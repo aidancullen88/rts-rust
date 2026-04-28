@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused)]
+
 extern crate glutin_window;
 extern crate graphics;
 extern crate opengl_graphics;
@@ -27,9 +30,8 @@ use crate::point::Point;
 struct App {
     gl: GlGraphics,
     mouse_pos: [f64; 2],
-    npcs: NpcMap,
+    npcs: Npcs,
     game_state: GameState,
-    cell_map: Cells,
     // The glyphs are init'd and stay the same throughout the program, hence 'static
     glyphs: GlyphCache<'static>,
     game_map: GameMap,
@@ -39,21 +41,25 @@ struct GameMap {
     cover: Vec<Cover>,
 }
 
-struct NpcMap {
+struct Npcs {
     map: HashMap<Id, Npc>,
+    cell_map: Cells,
     selected: Option<Id>,
 }
 
-impl NpcMap {
-    pub fn new() -> NpcMap {
-        NpcMap {
+impl Npcs {
+    pub fn new(cell_size: f64) -> Npcs {
+        Npcs {
             map: HashMap::new(),
             selected: None,
+            cell_map: Cells::new(cell_size),
         }
     }
 
-    pub fn add_npc(&mut self, id: Id, npc: Npc) {
-        self.map.insert(id, npc);
+    pub fn spawn_npc(&mut self, npc_pos: Point, look_dir: crate::vector::Vector, game_state: &mut GameState) {
+        let npc_id = game_state.get_next_entity_id();
+        self.cell_map.update_position(&npc_pos, &npc_id);
+        self.map.insert(npc_id, Npc::new(npc_id, npc_pos).set_look_dir(look_dir));
     }
 
     pub fn get_npc_by_id(&self, id: &Id) -> Option<&Npc> {
@@ -92,7 +98,7 @@ impl App {
             graphics::clear(graphics::color::BLACK, gl);
             crate::cover::render_covers(&self.game_map.cover, &c, gl);
             // If we're going to render text, need to pass the glyphs as well
-            crate::cover::render_grid(&self.cell_map, &c, gl, &mut self.glyphs);
+            crate::cover::render_grid(&self.npcs.cell_map, &c, gl, &mut self.glyphs);
             crate::npc::render_npcs(
                 self.npcs.get_npc_iter(),
                 self.npcs.get_selected_npc_id(),
@@ -111,7 +117,7 @@ impl App {
 
         if let Some(Button::Mouse(MouseButton::Left)) = event.press_args() {
             // check mouse pos against npc list to see which ones collide, and pick the first
-            if let Some(npc_id) = self.cell_map.check_if_target_collides_with_npc(
+            if let Some(npc_id) = self.npcs.cell_map.check_if_target_collides_with_npc(
                 &Point::new(self.mouse_pos[0], self.mouse_pos[1]),
                 &self.npcs,
             ) {
@@ -124,13 +130,7 @@ impl App {
                 } else {
                     [-1.0, 0.0]
                 };
-                let new_npc = Npc::new(
-                    &mut self.game_state,
-                    &mut self.cell_map,
-                    self.mouse_pos.into(),
-                )
-                .set_look_dir(look_dir.into());
-                self.npcs.add_npc(new_npc.get_id(), new_npc);
+                self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), &mut self.game_state);
             }
         }
         if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {}
@@ -186,12 +186,11 @@ fn main() {
         gl: GlGraphics::new(opengl),
         // Required for mouse updates: initialise to a sensible default
         mouse_pos: [0.0; 2],
-        npcs: NpcMap::new(),
+        npcs: Npcs::new(50.0),
         game_state: GameState {
             paused: false,
             entity_id_counter: 0,
         },
-        cell_map: Cells::new(100.0),
         // Initialise the glpyh cache to use for drawing text
         glyphs: GlyphCache::new(
             "assets/Roboto-Regular.ttf",

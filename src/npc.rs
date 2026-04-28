@@ -1,7 +1,6 @@
 use graphics::{Context, Graphics};
 
 use crate::{
-    GameState,
     cell_map::{self, Cells},
     point::Point,
     vector::{self, Vector},
@@ -36,9 +35,7 @@ struct NpcTasks {
 }
 
 impl Npc {
-    pub fn new(game_state: &mut GameState, cell_map: &mut cell_map::Cells, pos: Point) -> Npc {
-        let npc_id = game_state.get_next_entity_id();
-        cell_map.update_position(&pos, &npc_id);
+    pub fn new(npc_id: Id, pos: Point) -> Npc {
         Npc {
             id: npc_id,
             pos,

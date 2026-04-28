@@ -8,7 +8,7 @@ use crate::point::Point;
 pub struct Cover {
     start: Point,
     end: Point,
-    midpoint: Point,
+    // midpoint: Point,
 }
 
 pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
@@ -21,7 +21,7 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
             Cover {
                 start: start_point,
                 end: end_point,
-                midpoint: mid_point,
+                // midpoint: mid_point,
             }
         })
         .collect()

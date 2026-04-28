@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::NpcMap;
+use crate::Npcs;
 use crate::npc::Id;
 use crate::point;
 use crate::point::Point;
@@ -42,7 +42,7 @@ impl Cells {
     /// to contain the id of the item
     fn insert_to_cell(&mut self, cell: CellPos, item_id: &Id) {
         // Get the current hashset for this cell, or create the default if it doesn't exist
-        self.cells.entry(cell.clone()).or_default().insert(*item_id);
+        self.cells.entry(cell).or_default().insert(*item_id);
     }
     /// Update the item list to contain the item id and the position. This is used to quickly check
     /// where an item is in the cell map, given its id
@@ -102,7 +102,7 @@ impl Cells {
         self.set_item_pos(item_id, new_cell);
     }
 
-    pub fn check_if_target_collides_with_npc(&mut self, target_pos: &Point, npcs: &NpcMap) -> Option<Id> {
+    pub fn check_if_target_collides_with_npc(&self, target_pos: &Point, npcs: &Npcs) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
             .and_then(|entity_list| {
