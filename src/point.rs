@@ -47,8 +47,8 @@ pub fn calculate_midpoint(a: &Point, b: &Point) -> Point {
     }
 }
 
-pub fn check_distance_between_points(a: &Point, b: &Point, distance: &f64) -> bool {
-    distance * distance >= get_squared_distance_between_points(a, b)
+pub fn is_point_distance_leq(a: &Point, b: &Point, threshold: f64) -> bool {
+    threshold * threshold >= get_squared_distance_between_points(a, b)
 }
 
 fn get_squared_distance_between_points(a: &Point, b: &Point) -> f64 {

@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::Npcs;
-use crate::npc::Id;
+use crate::npc::{Id, Npc};
 use crate::point;
 use crate::point::Point;
 
-#[derive(Eq, PartialEq, Hash, Clone)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct CellPos(pub u32, pub u32);
 
 /// Holds the cell map, item map, and cell size
@@ -22,9 +22,9 @@ pub struct CellPos(pub u32, pub u32);
 ///
 /// CELL SIZE: The size of the cells in pixels. This should be kept relatively small, maybe 2 x the
 /// biggest collider in the map
+#[derive(Debug)]
 pub struct Cells {
     cells: HashMap<CellPos, HashSet<Id>>,
-    items: HashMap<Id, CellPos>,
     cell_size: f64,
 }
 
@@ -32,7 +32,6 @@ impl Cells {
     pub fn new(cell_size: f64) -> Self {
         Cells {
             cells: HashMap::new(),
-            items: HashMap::new(),
             cell_size: cell_size,
         }
     }
@@ -43,11 +42,6 @@ impl Cells {
     fn insert_to_cell(&mut self, cell: CellPos, item_id: &Id) {
         // Get the current hashset for this cell, or create the default if it doesn't exist
         self.cells.entry(cell).or_default().insert(*item_id);
-    }
-    /// Update the item list to contain the item id and the position. This is used to quickly check
-    /// where an item is in the cell map, given its id
-    fn set_item_pos(&mut self, item_id: &Id, cell: CellPos) {
-        self.items.insert(*item_id, cell);
     }
     /// Remove an item from the given cell. If the cell is now empty, remove the whole hashmap
     /// entry
@@ -88,33 +82,45 @@ impl Cells {
 
     /// Updates the position of an item in the cell map, inserting if it didn't already exist. Also
     /// handles updating the item map. This is the main function that is called when an item moves.
-    pub fn update_position(&mut self, pos: &Point, item_id: &Id) {
-        let new_cell = self.calculate_cell_from_pos(pos);
-        if let Some(old_cell) = self.items.get(&item_id).cloned() {
-            // check if the cell hasn't changed
-            if old_cell != new_cell {
-                self.remove_from_cell(&old_cell, &item_id);
-            } else {
-                return;
-            }
+    pub fn update_position(
+        &mut self,
+        new_pos: &Point,
+        old_cell: &CellPos,
+        item_id: &Id,
+    ) -> Option<CellPos> {
+        let new_cell = self.calculate_cell_from_pos(&new_pos);
+        // check if the cell hasn't changed
+        if old_cell != &new_cell {
+            self.remove_from_cell(&old_cell, &item_id);
+        } else {
+            return None;
         };
         self.insert_to_cell(new_cell.clone(), item_id);
-        self.set_item_pos(item_id, new_cell);
+        Some(new_cell)
+    }
+
+    pub fn register_initial_position(&mut self, pos: &Point, item_id: &Id) -> CellPos {
+        let init_cell = self.calculate_cell_from_pos(pos);
+        self.insert_to_cell(init_cell.clone(), item_id);
+        init_cell
     }
 
     pub fn check_if_target_collides_with_npc(&self, target_pos: &Point, npcs: &Npcs) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
             .and_then(|entity_list| {
-                println!("npc list: {:?}", entity_list);
-                entity_list.iter().filter(|e| {
-                    point::check_distance_between_points(
-                        npcs.get_npc_by_id(&e).unwrap().get_position(),
-                        target_pos,
-                        &30.0,
-                    )
-                // Get the first from the list if there is one, or else None
-                }).next().copied()
+                entity_list
+                    .iter()
+                    .filter(|e| {
+                        point::is_point_distance_leq(
+                            npcs.get_npc_by_id(&e).unwrap().get_position(),
+                            target_pos,
+                            30.0,
+                        )
+                        // Get the first from the list if there is one, or else None
+                    })
+                    .next()
+                    .copied()
             })
     }
 

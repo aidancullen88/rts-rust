@@ -1,8 +1,8 @@
 use graphics::{Context, Graphics};
 
 use crate::{
-    cell_map::{self, Cells},
-    point::Point,
+    cell_map::{self, CellPos, Cells},
+    point::{self, Point},
     vector::{self, Vector},
 };
 
@@ -23,10 +23,16 @@ pub struct Npc {
     look_dir: Vector,
     radius: f64,
     tasks: NpcTasks,
+    attributes: NpcAttributes,
+}
+
+struct NpcAttributes {
+    speed: f64,
 }
 
 struct NpcKnowledge {
     movement_target: Option<Point>,
+    current_cell: CellPos,
 }
 
 struct NpcTasks {
@@ -35,12 +41,14 @@ struct NpcTasks {
 }
 
 impl Npc {
-    pub fn new(npc_id: Id, pos: Point) -> Npc {
+    pub fn new(npc_id: Id, cells: &mut Cells, pos: Point) -> Npc {
+        let current_cell = cells.register_initial_position(&pos, &npc_id);
         Npc {
             id: npc_id,
             pos,
             knowledge: NpcKnowledge {
                 movement_target: None,
+                current_cell,
             },
             look_dir: [1.0, 0.0].into(),
             radius: 15.0,
@@ -48,20 +56,21 @@ impl Npc {
                 current_action: None,
                 queue: std::collections::VecDeque::new(),
             },
+            attributes: NpcAttributes { speed: 100.0 },
         }
     }
 
-    pub fn set_look_dir(mut self, look_dir: Vector) -> Self {
+    pub fn set_look_dir(&mut self, look_dir: Vector) {
         self.look_dir = look_dir;
-        self
     }
 
-    pub fn update_position(&mut self, cells: &mut Cells, new_pos: Point) -> bool {
-        // TODO: check the new position first before moving? Might not be needed if we're doing
-        // pathfinding system rather than collision system
-        cells.update_position(&new_pos, &self.id);
+    pub fn update_position(&mut self, cells: &mut Cells, new_pos: Point) {
+        if let Some(new_cell) =
+            cells.update_position(&new_pos, &self.knowledge.current_cell, &self.id)
+        {
+            self.knowledge.current_cell = new_cell;
+        }
         self.pos = new_pos;
-        true
     }
 
     pub fn get_position(&self) -> &Point {
@@ -86,10 +95,9 @@ impl Npc {
             match action {
                 Action::Moving => self.move_npc(cells, dt),
             }
-            return;
+        } else {
+            self.setup_next_task();
         }
-
-        self.setup_next_task();
     }
 
     pub fn setup_next_task(&mut self) {
@@ -106,15 +114,29 @@ impl Npc {
     }
 
     fn move_npc(&mut self, cells: &mut cell_map::Cells, dt: &f64) {
-        if let Some(movement_target) = &self.knowledge.movement_target {
-            // update the position
-        }
+        let Some(movement_target) = &self.knowledge.movement_target else {
+            return;
+        };
+        if point::is_point_distance_leq(&self.pos, movement_target, 1.0) {
+            // Finish current movement task
+            self.tasks.current_action = None;
+            return;
+        };
+        let movement_direction = vector::get_direction_between_points(&self.pos, &movement_target);
+        let new_pos = vector::translate_point_direction_distance(
+            &self.pos,
+            &movement_direction,
+            &(self.attributes.speed * dt),
+        );
+        self.look_dir = movement_direction;
+        self.update_position(cells, new_pos);
     }
 
     fn target_move(&mut self, target_point: &Point) {
+        println!("targeting move to point: {:#?}", target_point);
         self.knowledge.movement_target = Some(target_point.to_owned());
+        self.tasks.current_action = Some(Action::Moving);
     }
-
 }
 
 #[derive(Clone)]

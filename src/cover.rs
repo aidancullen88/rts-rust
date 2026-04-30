@@ -52,7 +52,7 @@ pub fn render_grid<G: Graphics<Texture = Texture>>(
     let cell_size = cell_map.get_cell_size();
     const GREY: [f32; 4] = [1.0, 1.0, 1.0, 0.1];
     const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    for x in 1..12 {
+    for x in 1..100 {
         let float_val = f64::from(x);
         // Draw horizontal lines
         Line::new(GREY, 1.0).draw_from_to(
@@ -71,8 +71,8 @@ pub fn render_grid<G: Graphics<Texture = Texture>>(
             g,
         );
     }
-    for x in 0..20 {
-        for y in 0..20 {
+    for x in 0..100{
+        for y in 0..100 {
             let current_cell = CellPos(x, y);
             if let Some(cell_contents) = cell_map.get_cell_values(&current_cell) {
                 // Convert the HashSet contents to a nice vec
