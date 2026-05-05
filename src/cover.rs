@@ -2,13 +2,30 @@ use graphics::{Context, Graphics};
 use opengl_graphics::{GlyphCache, Texture};
 
 use crate::cell_map::{CellPos, Cells};
-use crate::point;
+use crate::point::{self, get_distance_between_points, is_point_distance_leq};
 use crate::point::Point;
+use crate::vector::{self, Vector};
 
 pub struct Cover {
     start: Point,
     end: Point,
-    // midpoint: Point,
+    midpoint: Point,
+    direction: Vector,
+    length: f64,
+}
+
+impl Cover {
+    pub fn get_midpoint(&self) -> &Point {
+        &self.midpoint
+    }
+    
+    pub fn get_direction(&self) -> &Vector {
+        &self.direction
+    }
+    
+    pub fn get_length(&self) -> &f64 {
+        &self.length
+    }
 }
 
 pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
@@ -18,13 +35,43 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
             let start_point = Point::new(c[0].into(), c[1].into());
             let end_point = Point::new(c[2].into(), c[3].into());
             let mid_point = point::calculate_midpoint(&start_point, &end_point);
+            let direction = vector::get_direction_between_points(&start_point, &end_point);
+            let length = point::get_distance_between_points(&start_point, &end_point);
             Cover {
                 start: start_point,
                 end: end_point,
-                // midpoint: mid_point,
+                midpoint: mid_point,
+                direction,
+                length,
             }
         })
         .collect()
+}
+
+pub fn get_random_cover_target<'a>(covers: &'a [Cover], npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
+    // Get the covers that are within the threshold, and the weight (threshold - distance)
+    let mut filtered_cover_iter: Vec<(f64, &Cover)> = covers.iter().filter_map(|c| {
+        let distance = get_distance_between_points(npc_pos, &c.midpoint);
+        if distance < threshold {
+            Some(((threshold - distance).powi(3), c))
+        } else {
+            None
+        }
+    }).collect();
+    // If there's no covers, return None
+    filtered_cover_iter.first()?;
+    // Get the total of all the weights
+    let total_weight: f64 = filtered_cover_iter.iter().map(|t| t.0).sum();
+    let random_threshold = fastrand::f64() * total_weight.clone();
+    let mut acc = 0.0;
+    // Get a random cover from the list, weighted to closer covers
+    for (weight, cover) in filtered_cover_iter {
+        acc += weight;
+        if random_threshold <= acc {
+            return Some(cover);
+        }
+    }
+    return None;
 }
 
 pub fn render_covers<G: Graphics>(covers: &Vec<Cover>, c: &Context, g: &mut G) {

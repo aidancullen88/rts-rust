@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::Npcs;
-use crate::npc::{Id, Npc};
+use crate::npc::NpcAttributes;
+use crate::npc::{Id, Npc, NpcMap};
 use crate::point;
 use crate::point::Point;
 
@@ -34,6 +34,10 @@ impl Cells {
             cells: HashMap::new(),
             cell_size: cell_size,
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.cells.clear();
     }
     // PRIVATE METHODS
 
@@ -105,17 +109,38 @@ impl Cells {
         init_cell
     }
 
-    pub fn check_if_target_collides_with_npc(&self, target_pos: &Point, npcs: &Npcs) -> Option<Id> {
+    pub fn check_if_npc_target_collides_with_npc(&self, target_pos: &Point, npc_info: &HashMap<Id, NpcAttributes>, npc_radius: f64) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
             .and_then(|entity_list| {
                 entity_list
                     .iter()
                     .filter(|e| {
+                        let current_npc_info = &npc_info.get(&e).expect("Npc shouldn't be missing from info map");
                         point::is_point_distance_leq(
-                            npcs.get_npc_by_id(&e).unwrap().get_position(),
+                            &current_npc_info.position,
                             target_pos,
-                            30.0,
+                            npc_radius + current_npc_info.radius,
+                        )
+                        // Get the first from the list if there is one, or else None
+                    })
+                    .next()
+                    .copied()
+            })
+    }
+
+    pub fn check_if_point_target_collides_with_npc(&self, target_pos: &Point, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
+        let target_cell = self.calculate_cell_from_pos(target_pos);
+        self.get_adjacent_entities(&target_cell)
+            .and_then(|entity_list| {
+                entity_list
+                    .iter()
+                    .filter(|e| {
+                        let current_npc_info = &npc_info.get(&e).expect("Npc shouldn't be missing from info map");
+                        point::is_point_distance_leq(
+                            &current_npc_info.position,
+                            target_pos,
+                            current_npc_info.radius,
                         )
                         // Get the first from the list if there is one, or else None
                     })

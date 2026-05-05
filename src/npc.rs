@@ -1,7 +1,10 @@
 use graphics::{Context, Graphics};
+use std::collections::HashMap;
 
 use crate::{
+    GameMap, GameState,
     cell_map::{self, CellPos, Cells},
+    cover::get_random_cover_target,
     point::{self, Point},
     vector::{self, Vector},
 };
@@ -16,23 +19,107 @@ impl std::fmt::Display for Id {
     }
 }
 
+pub struct NpcMap {
+    pub cell_map: Cells,
+    map: HashMap<Id, Npc>,
+    selected: Option<Id>,
+}
+
+// This can probably go in it's own file at some point
+impl NpcMap {
+    pub fn new(cell_size: f64) -> NpcMap {
+        NpcMap {
+            map: HashMap::new(),
+            selected: None,
+            cell_map: Cells::new(cell_size),
+        }
+    }
+
+    pub fn spawn_npc(
+        &mut self,
+        pos: Point,
+        look_dir: Vector,
+        enemy_dir: Option<Vector>,
+        game_state: &mut GameState,
+    ) -> Id {
+        let npc_id = game_state.get_next_entity_id();
+        let mut new_npc = Npc::new(npc_id, &mut self.cell_map, pos.clone());
+        new_npc.set_look_dir(look_dir);
+        if let Some(dir) = enemy_dir {
+            new_npc.set_enemy_dir(dir);
+        }
+        self.map.insert(npc_id, new_npc);
+        npc_id
+    }
+
+    pub fn get_npc_by_id_mut(&mut self, id: &Id) -> Option<&mut Npc> {
+        self.map.get_mut(id)
+    }
+
+    pub fn get_npc_by_id(&self, id: &Id) -> Option<&Npc> {
+        self.map.get(id)
+    }
+
+    pub fn get_npc_iter(&self) -> impl Iterator<Item = &Npc> {
+        self.map.values()
+    }
+
+    pub fn get_npc_info_map(&self) -> HashMap<Id, NpcAttributes> {
+        self.map
+            .iter()
+            .map(|(id, npc)| (*id, npc.attributes.clone()))
+            .collect()
+    }
+
+    pub fn select_npc(&mut self, id: Id) {
+        self.selected = Some(id);
+    }
+
+    pub fn deselect_npc(&mut self) {
+        self.selected = None;
+    }
+
+    pub fn get_selected_npc(&mut self) -> Option<&mut Npc> {
+        self.selected.and_then(|s| self.map.get_mut(&s))
+    }
+
+    pub fn get_selected_npc_id(&self) -> Option<&Id> {
+        self.selected.as_ref()
+    }
+
+    pub fn clear_npcs(&mut self) {
+        self.map.clear();
+        self.cell_map.clear();
+    }
+
+    pub fn update_npcs(&mut self, game_map: &GameMap, dt: &f64) {
+        let npc_info = self.get_npc_info_map();
+        for npc in self.map.values_mut() {
+            npc.act(&mut self.cell_map, game_map, &npc_info, dt);
+        }
+    }
+}
+
 pub struct Npc {
     id: Id,
-    pos: Point,
     knowledge: NpcKnowledge,
     look_dir: Vector,
-    radius: f64,
     tasks: NpcTasks,
     attributes: NpcAttributes,
 }
 
-struct NpcAttributes {
-    speed: f64,
+#[derive(Clone)]
+pub struct NpcAttributes {
+    pub speed: f64,
+    pub vision: f64,
+    pub radius: f64,
+    pub position: Point,
 }
 
 struct NpcKnowledge {
     movement_target: Option<Point>,
     current_cell: CellPos,
+    enemy_direction: Option<Vector>,
 }
 
 struct NpcTasks {
@@ -45,23 +132,31 @@ impl Npc {
         let current_cell = cells.register_initial_position(&pos, &npc_id);
         Npc {
             id: npc_id,
-            pos,
             knowledge: NpcKnowledge {
                 movement_target: None,
                 current_cell,
+                enemy_direction: None,
             },
             look_dir: [1.0, 0.0].into(),
-            radius: 15.0,
             tasks: NpcTasks {
                 current_action: None,
                 queue: std::collections::VecDeque::new(),
             },
-            attributes: NpcAttributes { speed: 100.0 },
+            attributes: NpcAttributes {
+                speed: 100.0,
+                vision: 500.0,
+                radius: 10.0,
+                position: pos,
+            },
         }
     }
 
     pub fn set_look_dir(&mut self, look_dir: Vector) {
         self.look_dir = look_dir;
+    }
+
+    pub fn set_enemy_dir(&mut self, enemy_dir: Vector) {
+        self.knowledge.enemy_direction = Some(enemy_dir);
     }
 
     pub fn update_position(&mut self, cells: &mut Cells, new_pos: Point) {
@@ -70,11 +165,11 @@ impl Npc {
         {
             self.knowledge.current_cell = new_cell;
         }
-        self.pos = new_pos;
+        self.attributes.position = new_pos;
     }
 
     pub fn get_position(&self) -> &Point {
-        &self.pos
+        &self.attributes.position
     }
 
     pub fn get_id(&self) -> Id {
@@ -90,22 +185,34 @@ impl Npc {
         self.tasks.queue.front()
     }
 
-    pub fn act(&mut self, cells: &mut cell_map::Cells, dt: &f64) {
+    pub fn act(
+        &mut self,
+        cells: &mut cell_map::Cells,
+        game_map: &GameMap,
+        npc_info: &HashMap<Id, NpcAttributes>,
+        dt: &f64,
+    ) {
         if let Some(action) = &self.tasks.current_action {
             match action {
-                Action::Moving => self.move_npc(cells, dt),
+                Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
             }
         } else {
-            self.setup_next_task();
+            self.setup_next_task(cells, game_map, npc_info);
         }
     }
 
-    pub fn setup_next_task(&mut self) {
+    pub fn setup_next_task(
+        &mut self,
+        cells: &cell_map::Cells,
+        game_map: &GameMap,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) {
         let Some(current_task) = self.tasks.queue.pop_front() else {
             return;
         };
         match &current_task.task_type {
             TaskType::Move(target_point) => self.target_move(&target_point),
+            TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
         }
     }
 
@@ -113,20 +220,38 @@ impl Npc {
         self.tasks.queue.push_back(task);
     }
 
-    fn move_npc(&mut self, cells: &mut cell_map::Cells, dt: &f64) {
-        let Some(movement_target) = &self.knowledge.movement_target else {
+    fn move_npc(
+        &mut self,
+        cells: &mut cell_map::Cells,
+        game_map: &GameMap,
+        npc_info: &HashMap<Id, NpcAttributes>,
+        dt: &f64,
+    ) {
+        let Some(movement_target) = self.knowledge.movement_target.clone() else {
             return;
         };
-        if point::is_point_distance_leq(&self.pos, movement_target, 1.0) {
+        if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
             self.tasks.current_action = None;
+            if let Some(enemy_dir) = &self.knowledge.enemy_direction {
+                self.look_dir = enemy_dir.clone();
+            };
             return;
         };
-        let movement_direction = vector::get_direction_between_points(&self.pos, &movement_target);
+        // If we're close to the destination, begin checking if another npc has moved into the
+        // target spot
+        if point::is_point_distance_leq(&self.attributes.position, &movement_target, 100.0)
+            && matches!(cells.check_if_npc_target_collides_with_npc(&movement_target, npc_info, self.attributes.radius), Some(id) if id != self.id)
+        {
+            println!("Someone took my spot!");
+            // Find another cover spot, we can proceed with moving after that
+            self.find_close_cover(cells, game_map, npc_info);
+        };
+        let movement_direction = vector::get_direction_between_points(&self.attributes.position, &movement_target);
         let new_pos = vector::translate_point_direction_distance(
-            &self.pos,
+            &self.attributes.position,
             &movement_direction,
-            &(self.attributes.speed * dt),
+            self.attributes.speed * dt,
         );
         self.look_dir = movement_direction;
         self.update_position(cells, new_pos);
@@ -135,6 +260,93 @@ impl Npc {
     fn target_move(&mut self, target_point: &Point) {
         println!("targeting move to point: {:#?}", target_point);
         self.knowledge.movement_target = Some(target_point.to_owned());
+        self.tasks.current_action = Some(Action::Moving);
+    }
+
+    fn find_close_cover(
+        &mut self,
+        cells: &cell_map::Cells,
+        game_map: &GameMap,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) {
+        const EXCLUSION_RADIUS: f64 = 5.0;
+        let Some(cover_target) =
+            get_random_cover_target(&game_map.cover, &self.attributes.position, self.attributes.vision)
+        else {
+            return;
+        };
+        let cover_radius = cover_target.get_length() / 2.0;
+        // Position the npc correctly on the cover by collision checking
+        let enemy_dir = self
+            .knowledge
+            .enemy_direction
+            .as_ref()
+            .expect("if there's no enemies, why are we taking cover?");
+        let cover_midpoint = cover_target.get_midpoint();
+        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+        let mut candidate_pos = vector::translate_point_direction_distance(
+            cover_midpoint,
+            &rev_enemy_dir,
+            self.attributes.radius + EXCLUSION_RADIUS,
+        );
+        println!("initial pos: {:#?}", candidate_pos);
+        let mut vert_adjust_accum = 0.0;
+        let mut horz_adjust_accum = 1.0;
+        let target_pos = loop {
+            if cells
+                .check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius)
+                .is_none()
+            {
+                break candidate_pos;
+            };
+            vert_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+            if horz_adjust_accum >= 3.0 {
+                return;
+            }
+            if vert_adjust_accum >= cover_radius {
+                vert_adjust_accum = 0.0;
+                horz_adjust_accum += 1.0;
+            }
+            let new_cover_point = vector::translate_point_direction_distance(
+                cover_midpoint,
+                cover_target.get_direction(),
+                vert_adjust_accum,
+            );
+            candidate_pos = vector::translate_point_direction_distance(
+                &new_cover_point,
+                &rev_enemy_dir,
+                (self.attributes.radius + EXCLUSION_RADIUS) * horz_adjust_accum,
+            );
+            println!("positive canditate pos: {:#?}", candidate_pos);
+            // If the positive point doesn't collide then return it, else set the candidate to the
+            // negative version and loop
+            println!(
+                "{:#?}",
+                cells.check_if_npc_target_collides_with_npc(
+                    &candidate_pos,
+                    npc_info,
+                    self.attributes.radius
+                )
+            );
+            if cells
+                .check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius)
+                .is_none()
+            {
+                break candidate_pos;
+            }
+            let neg_midpoint = vector::translate_point_direction_distance(
+                cover_midpoint,
+                cover_target.get_direction(),
+                -vert_adjust_accum,
+            );
+            candidate_pos = vector::translate_point_direction_distance(
+                &neg_midpoint,
+                &rev_enemy_dir,
+                (self.attributes.radius + EXCLUSION_RADIUS) * horz_adjust_accum,
+            );
+            println!("negative candidate pos: {:#?}", candidate_pos);
+        };
+        self.knowledge.movement_target = Some(target_pos);
         self.tasks.current_action = Some(Action::Moving);
     }
 }
@@ -147,6 +359,7 @@ pub struct Task {
 #[derive(Clone)]
 pub enum TaskType {
     Move(Point),
+    FindCloseCover,
 }
 
 impl Task {
@@ -170,14 +383,14 @@ pub fn render_npcs<'a, G: Graphics>(
             Some(id) if *id == npc.get_id() => graphics::color::RED,
             _ => graphics::color::WHITE,
         };
-        let circum = npc.radius * 2.0;
+        let circum = npc.attributes.radius * 2.0;
         // Render npc circle
         graphics::Ellipse::new_border(npc_colour, 0.5)
             .resolution(128)
             .draw(
                 [
-                    npc.pos.x - npc.radius,
-                    npc.pos.y - npc.radius,
+                    npc.attributes.position.x - npc.attributes.radius,
+                    npc.attributes.position.y - npc.attributes.radius,
                     circum,
                     circum,
                 ],
@@ -187,12 +400,9 @@ pub fn render_npcs<'a, G: Graphics>(
             );
         // Calculate the positions for the view direction
         let circum_point =
-            vector::translate_point_direction_distance(&npc.pos, &npc.look_dir, &npc.radius);
-        let extended_point = vector::translate_point_direction_distance(
-            &npc.pos,
-            &npc.look_dir,
-            &(npc.radius + 10.0),
-        );
+            vector::translate_point_direction_distance(&npc.attributes.position, &npc.look_dir, npc.attributes.radius);
+        let extended_point =
+            vector::translate_point_direction_distance(&npc.attributes.position, &npc.look_dir, npc.attributes.radius + 10.0);
         // Render the little "looking this way" line
         graphics::Line::new(graphics::color::RED, 1.0).draw_from_to(
             &circum_point,

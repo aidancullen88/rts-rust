@@ -24,13 +24,13 @@ use piston::{Button, ButtonState, GenericEvent, MouseButton};
 use crate::cell_map::Cells;
 use crate::cover::Cover;
 use crate::npc::{Id, Task, TaskType};
-use crate::npc::Npc;
+use crate::npc::{Npc, NpcMap};
 use crate::point::Point;
 
 struct App {
     gl: GlGraphics,
     mouse_pos: [f64; 2],
-    npcs: Npcs,
+    npcs: NpcMap,
     game_state: GameState,
     // The glyphs are init'd and stay the same throughout the program, hence 'static
     glyphs: GlyphCache<'static>,
@@ -39,61 +39,6 @@ struct App {
 
 struct GameMap {
     cover: Vec<Cover>,
-}
-
-struct Npcs {
-    map: HashMap<Id, Npc>,
-    cell_map: Cells,
-    selected: Option<Id>,
-}
-
-// This can probably go in it's own file at some point
-impl Npcs {
-    pub fn new(cell_size: f64) -> Npcs {
-        Npcs {
-            map: HashMap::new(),
-            selected: None,
-            cell_map: Cells::new(cell_size),
-        }
-    }
-
-    pub fn spawn_npc(&mut self, npc_pos: Point, look_dir: crate::vector::Vector, game_state: &mut GameState) -> Id {
-        let npc_id = game_state.get_next_entity_id();
-        let mut new_npc = Npc::new(npc_id, &mut self.cell_map, npc_pos.clone());
-        new_npc.set_look_dir(look_dir);
-        self.map.insert(npc_id, new_npc);
-        npc_id
-    }
-
-    pub fn get_npc_by_id(&self, id: &Id) -> Option<&Npc> {
-        self.map.get(id)
-    }
-
-    pub fn get_npc_iter(&self) -> impl Iterator<Item = &Npc> {
-        self.map.values()
-    }
-
-    pub fn select_npc(&mut self, id: Id) {
-        self.selected = Some(id);
-    }
-
-    pub fn deselect_npc(&mut self) {
-        self.selected = None;
-    }
-
-    pub fn get_selected_npc(&mut self) -> Option<&mut Npc> {
-        self.selected.and_then(|s| self.map.get_mut(&s))
-    }
-
-    pub fn get_selected_npc_id(&self) -> Option<&Id> {
-        self.selected.as_ref()
-    }
-
-    pub fn update_npcs(&mut self, dt: &f64) {
-        for npc in self.map.values_mut() {
-            npc.act(&mut self.cell_map, dt);
-        }
-    }
 }
 
 impl App {
@@ -118,7 +63,7 @@ impl App {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        self.npcs.update_npcs(&args.dt);
+        self.npcs.update_npcs(&self.game_map, &args.dt);
     }
     fn control<E: GenericEvent>(&mut self, window_dims: &[u32; 2], event: &E) {
         // Save the current mouse position to use throughout the event handlers
@@ -128,12 +73,14 @@ impl App {
 
         if let Some(Button::Mouse(MouseButton::Left)) = event.press_args() {
             // check mouse pos against npc list to see which ones collide, and pick the first
-            if let Some(npc_id) = self.npcs.cell_map.check_if_target_collides_with_npc(
+            if let Some(npc_id) = self.npcs.cell_map.check_if_point_target_collides_with_npc(
                 &self.mouse_pos.into(),
-                &self.npcs,
+                &self.npcs.get_npc_info_map(),
             ) {
-                println!("target collided");
-                self.npcs.select_npc(npc_id);
+                match self.npcs.get_selected_npc_id() {
+                    Some(id) if *id == npc_id => self.npcs.deselect_npc(),
+                    _ => self.npcs.select_npc(npc_id),
+                }
             } else if let Some(selected_npc) = self.npcs.get_selected_npc() {
                 selected_npc.queue_task(Task::new(TaskType::Move(self.mouse_pos.into())));
                 self.npcs.deselect_npc();
@@ -144,8 +91,9 @@ impl App {
                 } else {
                     [-1.0, 0.0]
                 };
-                let new_npc_id = self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), &mut self.game_state);
-                self.npcs.select_npc(new_npc_id);
+                let new_npc_id = self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), Some(look_dir.into()), &mut self.game_state);
+                let new_npc = self.npcs.get_npc_by_id_mut(&new_npc_id).expect("We just created this npc, so should be here");
+                new_npc.queue_task(Task::new(TaskType::FindCloseCover));
             }
         }
         if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {}
@@ -153,6 +101,9 @@ impl App {
             match button_args.button {
                 Button::Keyboard(piston::Key::P) if button_args.state == ButtonState::Press => {
                     self.game_state.toggle_pause()
+                }
+                Button::Keyboard(piston::Key::C) if button_args.state == ButtonState::Press => {
+                    self.npcs.clear_npcs();
                 }
                 _ => (),
             }
@@ -201,7 +152,7 @@ fn main() {
         gl: GlGraphics::new(opengl),
         // Required for mouse updates: initialise to a sensible default
         mouse_pos: [0.0; 2],
-        npcs: Npcs::new(60.0),
+        npcs: NpcMap::new(60.0),
         game_state: GameState {
             paused: false,
             entity_id_counter: 0,

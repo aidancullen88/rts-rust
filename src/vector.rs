@@ -1,5 +1,6 @@
 use crate::point::Point;
 
+#[derive(Clone)]
 pub struct Vector {
     x: f64,
     y: f64,
@@ -47,7 +48,7 @@ impl From<&[f64; 2]> for Vector {
 pub fn translate_point_direction_distance(
     point: &Point,
     direction: &Vector,
-    distance: &f64,
+    distance: f64,
 ) -> Point {
     Point {
         x: point.x + (direction.x * distance),
@@ -61,4 +62,8 @@ pub fn get_direction_between_points(a: &Point, b: &Point) -> Vector {
         y: b.y - a.y,
     }
     .normalise()
+}
+
+pub fn reverse_vector(v: &Vector) -> Vector {
+    Vector { x: -v.x, y: -v.y }
 }

@@ -54,3 +54,7 @@ pub fn is_point_distance_leq(a: &Point, b: &Point, threshold: f64) -> bool {
 fn get_squared_distance_between_points(a: &Point, b: &Point) -> f64 {
     (b.x - a.x).powi(2) + (b.y - a.y).powi(2)
 }
+
+pub fn get_distance_between_points(a: &Point, b: &Point) -> f64 {
+    ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()
+}
