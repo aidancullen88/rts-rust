@@ -1,5 +1,5 @@
 use graphics::{Context, Graphics};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     GameMap, GameState,
@@ -120,6 +120,7 @@ struct NpcKnowledge {
     movement_target: Option<Point>,
     current_cell: CellPos,
     enemy_direction: Option<Vector>,
+    full_covers: HashSet<Id>,
 }
 
 struct NpcTasks {
@@ -136,6 +137,7 @@ impl Npc {
                 movement_target: None,
                 current_cell,
                 enemy_direction: None,
+                full_covers: HashSet::new(),
             },
             look_dir: [1.0, 0.0].into(),
             tasks: NpcTasks {
@@ -185,7 +187,7 @@ impl Npc {
         self.tasks.queue.front()
     }
 
-    pub fn act(
+    fn act(
         &mut self,
         cells: &mut cell_map::Cells,
         game_map: &GameMap,
@@ -220,6 +222,10 @@ impl Npc {
         self.tasks.queue.push_back(task);
     }
 
+    pub fn end_current_action(&mut self) {
+        self.tasks.current_action = None;
+    }
+
     fn move_npc(
         &mut self,
         cells: &mut cell_map::Cells,
@@ -227,12 +233,14 @@ impl Npc {
         npc_info: &HashMap<Id, NpcAttributes>,
         dt: &f64,
     ) {
+        // If there's no movement target, then don't move
         let Some(movement_target) = self.knowledge.movement_target.clone() else {
             return;
         };
+        // If the npc is close enough to the movement target, stop moving and end the task
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
-            self.tasks.current_action = None;
+            self.end_current_action();
             if let Some(enemy_dir) = &self.knowledge.enemy_direction {
                 self.look_dir = enemy_dir.clone();
             };
@@ -247,7 +255,8 @@ impl Npc {
             // Find another cover spot, we can proceed with moving after that
             self.find_close_cover(cells, game_map, npc_info);
         };
-        let movement_direction = vector::get_direction_between_points(&self.attributes.position, &movement_target);
+        let movement_direction =
+            vector::get_direction_between_points(&self.attributes.position, &movement_target);
         let new_pos = vector::translate_point_direction_distance(
             &self.attributes.position,
             &movement_direction,
@@ -269,12 +278,17 @@ impl Npc {
         game_map: &GameMap,
         npc_info: &HashMap<Id, NpcAttributes>,
     ) {
+        // The distance npc's should try and keep from each other and from objects when positioning
         const EXCLUSION_RADIUS: f64 = 5.0;
-        let Some(cover_target) =
-            get_random_cover_target(&game_map.cover, &self.attributes.position, self.attributes.vision)
-        else {
+        let Some(cover_target) = get_random_cover_target(
+            &game_map.cover,
+            &self.knowledge.full_covers,
+            &self.attributes.position,
+            self.attributes.vision,
+        ) else {
             return;
         };
+        // Used to make sure npc's don't position themselves outside the cover
         let cover_radius = cover_target.get_length() / 2.0;
         // Position the npc correctly on the cover by collision checking
         let enemy_dir = self
@@ -282,70 +296,51 @@ impl Npc {
             .enemy_direction
             .as_ref()
             .expect("if there's no enemies, why are we taking cover?");
+
         let cover_midpoint = cover_target.get_midpoint();
         let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
-        let mut candidate_pos = vector::translate_point_direction_distance(
-            cover_midpoint,
-            &rev_enemy_dir,
-            self.attributes.radius + EXCLUSION_RADIUS,
-        );
-        println!("initial pos: {:#?}", candidate_pos);
+
+        // Accumulators for adjusting the position if there's an npc in the way
         let mut vert_adjust_accum = 0.0;
-        let mut horz_adjust_accum = 1.0;
+        let mut horz_adjust_accum = self.attributes.radius + EXCLUSION_RADIUS;
+        // Attempt a bunch of positions behind the cover, checking at each one if there's already
+        // an npc there
         let target_pos = loop {
-            if cells
-                .check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius)
-                .is_none()
-            {
-                break candidate_pos;
-            };
-            vert_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
-            if horz_adjust_accum >= 3.0 {
-                return;
-            }
-            if vert_adjust_accum >= cover_radius {
-                vert_adjust_accum = 0.0;
-                horz_adjust_accum += 1.0;
-            }
             let new_cover_point = vector::translate_point_direction_distance(
                 cover_midpoint,
                 cover_target.get_direction(),
                 vert_adjust_accum,
             );
-            candidate_pos = vector::translate_point_direction_distance(
+            let candidate_pos = vector::translate_point_direction_distance(
                 &new_cover_point,
                 &rev_enemy_dir,
-                (self.attributes.radius + EXCLUSION_RADIUS) * horz_adjust_accum,
+                horz_adjust_accum,
             );
-            println!("positive canditate pos: {:#?}", candidate_pos);
-            // If the positive point doesn't collide then return it, else set the candidate to the
-            // negative version and loop
-            println!(
-                "{:#?}",
-                cells.check_if_npc_target_collides_with_npc(
-                    &candidate_pos,
-                    npc_info,
-                    self.attributes.radius
-                )
-            );
-            if cells
-                .check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius)
-                .is_none()
-            {
+            if cells.check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius).is_none() {
                 break candidate_pos;
             }
-            let neg_midpoint = vector::translate_point_direction_distance(
-                cover_midpoint,
-                cover_target.get_direction(),
-                -vert_adjust_accum,
-            );
-            candidate_pos = vector::translate_point_direction_distance(
-                &neg_midpoint,
-                &rev_enemy_dir,
-                (self.attributes.radius + EXCLUSION_RADIUS) * horz_adjust_accum,
-            );
-            println!("negative candidate pos: {:#?}", candidate_pos);
+
+            // If this point wasn't a fit, then we check the increments:
+            if vert_adjust_accum > 0.0 {
+                vert_adjust_accum = -vert_adjust_accum;
+            } else {
+                let new_vert_adjust = vert_adjust_accum.abs() + self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                if new_vert_adjust >= cover_radius {
+                    horz_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                    vert_adjust_accum = 0.0;
+                } else {
+                    vert_adjust_accum += new_vert_adjust;
+                }
+            }
+            if horz_adjust_accum >= cover_radius {
+                println!("couldn't find cover here {}", horz_adjust_accum);
+                self.knowledge.full_covers.insert(*cover_target.get_id());
+                // Find another cover. Eventually, this should exclude any covers we know are full?
+                self.tasks.queue.push_back(Task::new(TaskType::FindCloseCover));
+                return;
+            }
         };
+        println!("found a target at this cover, moving now!");
         self.knowledge.movement_target = Some(target_pos);
         self.tasks.current_action = Some(Action::Moving);
     }
@@ -399,10 +394,16 @@ pub fn render_npcs<'a, G: Graphics>(
                 g,
             );
         // Calculate the positions for the view direction
-        let circum_point =
-            vector::translate_point_direction_distance(&npc.attributes.position, &npc.look_dir, npc.attributes.radius);
-        let extended_point =
-            vector::translate_point_direction_distance(&npc.attributes.position, &npc.look_dir, npc.attributes.radius + 10.0);
+        let circum_point = vector::translate_point_direction_distance(
+            &npc.attributes.position,
+            &npc.look_dir,
+            npc.attributes.radius,
+        );
+        let extended_point = vector::translate_point_direction_distance(
+            &npc.attributes.position,
+            &npc.look_dir,
+            npc.attributes.radius + 10.0,
+        );
         // Render the little "looking this way" line
         graphics::Line::new(graphics::color::RED, 1.0).draw_from_to(
             &circum_point,

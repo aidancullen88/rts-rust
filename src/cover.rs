@@ -1,12 +1,16 @@
 use graphics::{Context, Graphics};
 use opengl_graphics::{GlyphCache, Texture};
+use std::collections::HashSet;
 
+use crate::GameState;
 use crate::cell_map::{CellPos, Cells};
 use crate::point::{self, get_distance_between_points, is_point_distance_leq};
 use crate::point::Point;
 use crate::vector::{self, Vector};
+use crate::Id;
 
 pub struct Cover {
+    id: Id,
     start: Point,
     end: Point,
     midpoint: Point,
@@ -26,9 +30,13 @@ impl Cover {
     pub fn get_length(&self) -> &f64 {
         &self.length
     }
+    
+    pub fn get_id(&self) -> &Id {
+        &self.id
+    }
 }
 
-pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
+pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState) -> Vec<Cover> {
     simple_cover_list
         .iter()
         .map(|c| {
@@ -38,6 +46,7 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
             let direction = vector::get_direction_between_points(&start_point, &end_point);
             let length = point::get_distance_between_points(&start_point, &end_point);
             Cover {
+                id: game_state.get_next_entity_id(),
                 start: start_point,
                 end: end_point,
                 midpoint: mid_point,
@@ -48,10 +57,13 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6]) -> Vec<Cover> {
         .collect()
 }
 
-pub fn get_random_cover_target<'a>(covers: &'a [Cover], npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
+pub fn get_random_cover_target<'a>(covers: &'a [Cover], covers_to_exclude: &HashSet<Id>, npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
     // Get the covers that are within the threshold, and the weight (threshold - distance)
     let mut filtered_cover_iter: Vec<(f64, &Cover)> = covers.iter().filter_map(|c| {
         let distance = get_distance_between_points(npc_pos, &c.midpoint);
+        if covers_to_exclude.contains(&c.id) {
+            return None;
+        }
         if distance < threshold {
             Some(((threshold - distance).powi(3), c))
         } else {

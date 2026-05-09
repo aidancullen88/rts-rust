@@ -148,15 +148,15 @@ fn main() {
         [750, 500, 750, 600],
     ];
 
+    let mut game_state = GameState { paused: false, entity_id_counter: 0 };
+    let covers = crate::cover::init_covers(COVER_LIST, &mut game_state);
+
     let mut app = App {
         gl: GlGraphics::new(opengl),
         // Required for mouse updates: initialise to a sensible default
         mouse_pos: [0.0; 2],
         npcs: NpcMap::new(60.0),
-        game_state: GameState {
-            paused: false,
-            entity_id_counter: 0,
-        },
+        game_state: game_state,
         // Initialise the glpyh cache to use for drawing text
         glyphs: GlyphCache::new(
             "assets/Roboto-Regular.ttf",
@@ -165,7 +165,7 @@ fn main() {
         )
         .unwrap(),
         game_map: GameMap {
-            cover: crate::cover::init_covers(COVER_LIST),
+            cover: covers,
         },
     };
 
