@@ -1,6 +1,6 @@
 use crate::point::Point;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Vector {
     x: f64,
     y: f64,

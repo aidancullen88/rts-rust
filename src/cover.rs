@@ -1,6 +1,6 @@
 use graphics::{Context, Graphics};
 use opengl_graphics::{GlyphCache, Texture};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 use crate::GameState;
 use crate::cell_map::{CellPos, Cells};
@@ -9,6 +9,7 @@ use crate::point::Point;
 use crate::vector::{self, Vector};
 use crate::Id;
 
+#[derive(Debug)]
 pub struct Cover {
     id: Id,
     start: Point,
@@ -36,7 +37,7 @@ impl Cover {
     }
 }
 
-pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState) -> Vec<Cover> {
+pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState) -> HashMap<Id, Cover> {
     simple_cover_list
         .iter()
         .map(|c| {
@@ -45,21 +46,22 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState)
             let mid_point = point::calculate_midpoint(&start_point, &end_point);
             let direction = vector::get_direction_between_points(&start_point, &end_point);
             let length = point::get_distance_between_points(&start_point, &end_point);
-            Cover {
-                id: game_state.get_next_entity_id(),
+            let id = game_state.get_next_entity_id();
+            (id, Cover {
+                id,
                 start: start_point,
                 end: end_point,
                 midpoint: mid_point,
                 direction,
                 length,
-            }
+            })
         })
         .collect()
 }
 
-pub fn get_random_cover_target<'a>(covers: &'a [Cover], covers_to_exclude: &HashSet<Id>, npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
+pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exclude: &HashSet<Id>, npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
     // Get the covers that are within the threshold, and the weight (threshold - distance)
-    let mut filtered_cover_iter: Vec<(f64, &Cover)> = covers.iter().filter_map(|c| {
+    let mut filtered_cover_iter: Vec<(f64, &Cover)> = covers.iter().filter_map(|(id, c)| {
         let distance = get_distance_between_points(npc_pos, &c.midpoint);
         if covers_to_exclude.contains(&c.id) {
             return None;
@@ -86,9 +88,9 @@ pub fn get_random_cover_target<'a>(covers: &'a [Cover], covers_to_exclude: &Hash
     return None;
 }
 
-pub fn render_covers<G: Graphics>(covers: &Vec<Cover>, c: &Context, g: &mut G) {
+pub fn render_covers<G: Graphics>(covers: &HashMap<Id, Cover>, c: &Context, g: &mut G) {
     use graphics::Line;
-    for cover in covers {
+    for (id, cover) in covers {
         // render
         Line::new(graphics::color::WHITE, 1.0).draw_from_to(
             &cover.start,

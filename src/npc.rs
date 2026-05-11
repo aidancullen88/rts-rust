@@ -120,6 +120,7 @@ struct NpcKnowledge {
     movement_target: Option<Point>,
     current_cell: CellPos,
     enemy_direction: Option<Vector>,
+    cover_target: Option<Id>,
     full_covers: HashSet<Id>,
 }
 
@@ -137,6 +138,7 @@ impl Npc {
                 movement_target: None,
                 current_cell,
                 enemy_direction: None,
+                cover_target: None,
                 full_covers: HashSet::new(),
             },
             look_dir: [1.0, 0.0].into(),
@@ -253,6 +255,9 @@ impl Npc {
         {
             println!("Someone took my spot!");
             // Find another cover spot, we can proceed with moving after that
+            // TODO: this should check the current cover first! and if there's no cover, it should
+            // do something else
+            // Probably: save the current cover to the npc in knowledge, check that
             self.find_close_cover(cells, game_map, npc_info);
         };
         let movement_direction =
@@ -280,14 +285,28 @@ impl Npc {
     ) {
         // The distance npc's should try and keep from each other and from objects when positioning
         const EXCLUSION_RADIUS: f64 = 5.0;
-        let Some(cover_target) = get_random_cover_target(
-            &game_map.cover,
-            &self.knowledge.full_covers,
-            &self.attributes.position,
-            self.attributes.vision,
-        ) else {
+        let Some(cover_target) = self
+            .knowledge
+            .cover_target
+            .and_then(|id| game_map.cover.get(&id))
+            // Don't use the current cover if it's marked as full
+            .and_then(|cover| {
+                (!self.knowledge.full_covers.contains(cover.get_id())).then_some(cover)
+            })
+            .or_else(|| {
+                get_random_cover_target(
+                    &game_map.cover,
+                    &self.knowledge.full_covers,
+                    &self.attributes.position,
+                    self.attributes.vision,
+                )
+            })
+        else {
+            println!("no covers found, we should just stop moving?");
+            self.end_current_action();
             return;
         };
+        println!("excluded covers: {:#?}", self.knowledge.full_covers);
         // Used to make sure npc's don't position themselves outside the cover
         let cover_radius = cover_target.get_length() / 2.0;
         // Position the npc correctly on the cover by collision checking
@@ -316,7 +335,14 @@ impl Npc {
                 &rev_enemy_dir,
                 horz_adjust_accum,
             );
-            if cells.check_if_npc_target_collides_with_npc(&candidate_pos, npc_info, self.attributes.radius).is_none() {
+            if cells
+                .check_if_npc_target_collides_with_npc(
+                    &candidate_pos,
+                    npc_info,
+                    self.attributes.radius,
+                )
+                .is_none()
+            {
                 break candidate_pos;
             }
 
@@ -324,7 +350,8 @@ impl Npc {
             if vert_adjust_accum > 0.0 {
                 vert_adjust_accum = -vert_adjust_accum;
             } else {
-                let new_vert_adjust = vert_adjust_accum.abs() + self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                let new_vert_adjust =
+                    vert_adjust_accum.abs() + self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
                 if new_vert_adjust >= cover_radius {
                     horz_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
                     vert_adjust_accum = 0.0;
@@ -334,14 +361,19 @@ impl Npc {
             }
             if horz_adjust_accum >= cover_radius {
                 println!("couldn't find cover here {}", horz_adjust_accum);
+                self.end_current_action();
+                // Why does this not exclude the full cover??
                 self.knowledge.full_covers.insert(*cover_target.get_id());
                 // Find another cover. Eventually, this should exclude any covers we know are full?
-                self.tasks.queue.push_back(Task::new(TaskType::FindCloseCover));
+                self.tasks
+                    .queue
+                    .push_back(Task::new(TaskType::FindCloseCover));
                 return;
             }
         };
         println!("found a target at this cover, moving now!");
         self.knowledge.movement_target = Some(target_pos);
+        self.knowledge.cover_target = Some(*cover_target.get_id());
         self.tasks.current_action = Some(Action::Moving);
     }
 }

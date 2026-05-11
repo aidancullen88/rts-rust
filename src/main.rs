@@ -38,7 +38,7 @@ struct App {
 }
 
 struct GameMap {
-    cover: Vec<Cover>,
+    cover: HashMap<Id, Cover>,
 }
 
 impl App {
