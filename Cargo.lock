@@ -646,17 +646,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "getting-started"
-version = "0.1.0"
-dependencies = [
- "fastrand",
- "piston",
- "piston2d-graphics",
- "piston2d-opengl_graphics",
- "pistoncore-glutin_window",
-]
-
-[[package]]
 name = "gif"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1901,6 +1890,17 @@ name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+
+[[package]]
+name = "rts"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "piston",
+ "piston2d-graphics",
+ "piston2d-opengl_graphics",
+ "pistoncore-glutin_window",
+]
 
 [[package]]
 name = "rustc-hash"

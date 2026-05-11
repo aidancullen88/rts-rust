@@ -1,5 +1,5 @@
 [package]
-name = "getting-started"
+name = "rts"
 version = "0.1.0"
 edition = "2024"
 

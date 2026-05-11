@@ -243,6 +243,7 @@ impl Npc {
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
             self.end_current_action();
+            self.knowledge.cover_target = None;
             if let Some(enemy_dir) = &self.knowledge.enemy_direction {
                 self.look_dir = enemy_dir.clone();
             };
@@ -253,12 +254,13 @@ impl Npc {
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 100.0)
             && matches!(cells.check_if_npc_target_collides_with_npc(&movement_target, npc_info, self.attributes.radius), Some(id) if id != self.id)
         {
-            println!("Someone took my spot!");
-            // Find another cover spot, we can proceed with moving after that
-            // TODO: this should check the current cover first! and if there's no cover, it should
-            // do something else
-            // Probably: save the current cover to the npc in knowledge, check that
-            self.find_close_cover(cells, game_map, npc_info);
+            // Find another cover spot if we were moving to cover
+            // If not, just stop moving
+            if self.knowledge.cover_target.is_some() {
+                self.find_close_cover(cells, game_map, npc_info);
+            } else {
+                self.end_current_action();
+            };
         };
         let movement_direction =
             vector::get_direction_between_points(&self.attributes.position, &movement_target);
@@ -293,6 +295,7 @@ impl Npc {
             .and_then(|cover| {
                 (!self.knowledge.full_covers.contains(cover.get_id())).then_some(cover)
             })
+            // If there's no current cover, try and get another one from ones nearby
             .or_else(|| {
                 get_random_cover_target(
                     &game_map.cover,
@@ -302,11 +305,12 @@ impl Npc {
                 )
             })
         else {
-            println!("no covers found, we should just stop moving?");
+            // If there were no covers in the list, just stop moving (for now).
+            // TODO: This should probably return to another decision later on
+            println!("no covers found, we stop moving");
             self.end_current_action();
             return;
         };
-        println!("excluded covers: {:#?}", self.knowledge.full_covers);
         // Used to make sure npc's don't position themselves outside the cover
         let cover_radius = cover_target.get_length() / 2.0;
         // Position the npc correctly on the cover by collision checking
@@ -325,6 +329,7 @@ impl Npc {
         // Attempt a bunch of positions behind the cover, checking at each one if there's already
         // an npc there
         let target_pos = loop {
+            // Check the current cover position
             let new_cover_point = vector::translate_point_direction_distance(
                 cover_midpoint,
                 cover_target.get_direction(),
@@ -343,24 +348,38 @@ impl Npc {
                 )
                 .is_none()
             {
+                // If this spot is good, then finish the loop
                 break candidate_pos;
             }
 
             // If this point wasn't a fit, then we check the increments:
+            // If we checked the positive direction last, check the negative now
             if vert_adjust_accum > 0.0 {
                 vert_adjust_accum = -vert_adjust_accum;
+                continue;
+            // Otherwise, we must have checked the negative or 0 direction so check the positive
+            // direction
             } else {
+                // Get the new vertical adjustment
                 let new_vert_adjust =
                     vert_adjust_accum.abs() + self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                // If the vert adjustment is going to put the npc out of cover, then reset to 0 and
+                // increment the horizontal adjustment
                 if new_vert_adjust >= cover_radius {
                     horz_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
                     vert_adjust_accum = 0.0;
                 } else {
-                    vert_adjust_accum += new_vert_adjust;
+                    // If it's not, then we will go check the positive direction
+                    vert_adjust_accum = new_vert_adjust;
+                    continue;
                 }
             }
+            // Check if the horizontal adjustment puts them out of cover. This exact method could
+            // change (cover radius is an odd metric). If so, then stop moving and insert this
+            // cover into the npc's list of full covers. If not, then keep looping and check the
+            // next midpoint
             if horz_adjust_accum >= cover_radius {
-                println!("couldn't find cover here {}", horz_adjust_accum);
+                // println!("couldn't find cover here {}", horz_adjust_accum);
                 self.end_current_action();
                 // Why does this not exclude the full cover??
                 self.knowledge.full_covers.insert(*cover_target.get_id());
@@ -371,7 +390,8 @@ impl Npc {
                 return;
             }
         };
-        println!("found a target at this cover, moving now!");
+        // If we made it out of the loop, we have a cover target pos to move to. Set the movement
+        // target, the cover target, and the action
         self.knowledge.movement_target = Some(target_pos);
         self.knowledge.cover_target = Some(*cover_target.get_id());
         self.tasks.current_action = Some(Action::Moving);

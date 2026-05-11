@@ -60,6 +60,9 @@ pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState)
 }
 
 pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exclude: &HashSet<Id>, npc_pos: &Point, threshold: f64) -> Option<&'a Cover> {
+    // The power here determines how likely the npc is to pick a cover further away
+    // Eventually, this could be passed in from npc info!
+    const CHOICE_FACTOR: i32 = 6;
     // Get the covers that are within the threshold, and the weight (threshold - distance)
     let mut filtered_cover_iter: Vec<(f64, &Cover)> = covers.iter().filter_map(|(id, c)| {
         let distance = get_distance_between_points(npc_pos, &c.midpoint);
@@ -67,7 +70,7 @@ pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exc
             return None;
         }
         if distance < threshold {
-            Some(((threshold - distance).powi(3), c))
+            Some(((threshold - distance).powi(CHOICE_FACTOR), c))
         } else {
             None
         }

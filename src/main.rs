@@ -27,6 +27,13 @@ use crate::npc::{Id, Task, TaskType};
 use crate::npc::{Npc, NpcMap};
 use crate::point::Point;
 
+#[macro_export]
+macro_rules! piston_key {
+    ($i:ident) => {
+        Button::Keyboard(piston::Key::$i)
+    };
+}
+
 struct App {
     gl: GlGraphics,
     mouse_pos: [f64; 2],
@@ -81,6 +88,7 @@ impl App {
                     Some(id) if *id == npc_id => self.npcs.deselect_npc(),
                     _ => self.npcs.select_npc(npc_id),
                 }
+            // DEV: allows direct control of selected npcs
             } else if let Some(selected_npc) = self.npcs.get_selected_npc() {
                 selected_npc.queue_task(Task::new(TaskType::Move(self.mouse_pos.into())));
                 self.npcs.deselect_npc();
@@ -98,12 +106,18 @@ impl App {
         }
         if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {}
         if let Some(button_args) = event.button_args() {
-            match button_args.button {
-                Button::Keyboard(piston::Key::P) if button_args.state == ButtonState::Press => {
+            match (button_args.button, button_args.state) {
+                (piston_key!(P), ButtonState::Press) => {
                     self.game_state.toggle_pause()
                 }
-                Button::Keyboard(piston::Key::C) if button_args.state == ButtonState::Press => {
+                (piston_key!(C), ButtonState::Press) => {
                     self.npcs.clear_npcs();
+                }
+                // DEV: selected npc moves to cover
+                (piston_key!(F), ButtonState::Press) => {
+                    if let Some(selected_npc) = self.npcs.get_selected_npc() {
+                        selected_npc.queue_task(Task::new(TaskType::FindCloseCover));
+                    }
                 }
                 _ => (),
             }
