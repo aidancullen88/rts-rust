@@ -1,6 +1,10 @@
 use graphics::{Context, Graphics};
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
+use crate::EffectQueue;
+use crate::effect::Bullet;
+use crate::point::get_distance_between_points;
 use crate::{
     GameMap, GameState,
     cell_map::{self, CellPos, Cells},
@@ -40,10 +44,11 @@ impl NpcMap {
         pos: Point,
         look_dir: Vector,
         enemy_dir: Option<Vector>,
+        team: NpcTeam,
         game_state: &mut GameState,
     ) -> Id {
         let npc_id = game_state.get_next_entity_id();
-        let mut new_npc = Npc::new(npc_id, &mut self.cell_map, pos.clone());
+        let mut new_npc = Npc::new(npc_id, &mut self.cell_map, pos.clone(), team);
         new_npc.set_look_dir(look_dir);
         if let Some(dir) = enemy_dir {
             new_npc.set_enemy_dir(dir);
@@ -92,10 +97,10 @@ impl NpcMap {
         self.cell_map.clear();
     }
 
-    pub fn update_npcs(&mut self, game_map: &GameMap, dt: &f64) {
+    pub fn update_npcs(&mut self, game_map: &GameMap, effects: &mut crate::EffectQueue, dt: &f64) {
         let npc_info = self.get_npc_info_map();
         for npc in self.map.values_mut() {
-            npc.act(&mut self.cell_map, game_map, &npc_info, dt);
+            npc.act(&mut self.cell_map, game_map, &npc_info, effects, dt);
         }
     }
 }
@@ -114,6 +119,7 @@ pub struct NpcAttributes {
     pub vision: f64,
     pub radius: f64,
     pub position: Point,
+    pub team: NpcTeam,
 }
 
 struct NpcKnowledge {
@@ -122,6 +128,7 @@ struct NpcKnowledge {
     enemy_direction: Option<Vector>,
     cover_target: Option<Id>,
     full_covers: HashSet<Id>,
+    shoot_target: Option<Point>,
 }
 
 struct NpcTasks {
@@ -129,8 +136,24 @@ struct NpcTasks {
     queue: std::collections::VecDeque<Task>,
 }
 
+#[derive(Clone)]
+pub enum NpcTeam {
+    Blue,
+    Red,
+}
+
+impl NpcTeam {
+    fn get_enemies(&self) -> Option<&NpcTeam> {
+        match &self {
+            NpcTeam::Blue => Some(&NpcTeam::Red),
+            NpcTeam::Red => Some(&NpcTeam::Blue),
+            _ => None,
+        }
+    }
+}
+
 impl Npc {
-    pub fn new(npc_id: Id, cells: &mut Cells, pos: Point) -> Npc {
+    pub fn new(npc_id: Id, cells: &mut Cells, pos: Point, team: NpcTeam) -> Npc {
         let current_cell = cells.register_initial_position(&pos, &npc_id);
         Npc {
             id: npc_id,
@@ -140,6 +163,7 @@ impl Npc {
                 enemy_direction: None,
                 cover_target: None,
                 full_covers: HashSet::new(),
+                shoot_target: None,
             },
             look_dir: [1.0, 0.0].into(),
             tasks: NpcTasks {
@@ -151,6 +175,7 @@ impl Npc {
                 vision: 500.0,
                 radius: 10.0,
                 position: pos,
+                team,
             },
         }
     }
@@ -194,11 +219,13 @@ impl Npc {
         cells: &mut cell_map::Cells,
         game_map: &GameMap,
         npc_info: &HashMap<Id, NpcAttributes>,
+        effects: &mut EffectQueue,
         dt: &f64,
     ) {
         if let Some(action) = &self.tasks.current_action {
             match action {
                 Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
+                Action::Shooting => self.shoot(effects),
             }
         } else {
             self.setup_next_task(cells, game_map, npc_info);
@@ -217,6 +244,7 @@ impl Npc {
         match &current_task.task_type {
             TaskType::Move(target_point) => self.target_move(&target_point),
             TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
+            TaskType::FindTarget => self.find_target(cells, npc_info),
         }
     }
 
@@ -273,8 +301,18 @@ impl Npc {
         self.update_position(cells, new_pos);
     }
 
+    fn shoot(&mut self, effects: &mut EffectQueue) {
+        effects.push(Box::new(Bullet::new(
+            self.get_position().clone(),
+            self.knowledge
+                .shoot_target
+                .clone()
+                .expect("Shouldn't be shooting without a target"),
+        )));
+        self.end_current_action();
+    }
+
     fn target_move(&mut self, target_point: &Point) {
-        println!("targeting move to point: {:#?}", target_point);
         self.knowledge.movement_target = Some(target_point.to_owned());
         self.tasks.current_action = Some(Action::Moving);
     }
@@ -307,7 +345,6 @@ impl Npc {
         else {
             // If there were no covers in the list, just stop moving (for now).
             // TODO: This should probably return to another decision later on
-            println!("no covers found, we stop moving");
             self.end_current_action();
             return;
         };
@@ -396,6 +433,26 @@ impl Npc {
         self.knowledge.cover_target = Some(*cover_target.get_id());
         self.tasks.current_action = Some(Action::Moving);
     }
+
+    fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) {
+        // Get the closest N
+        let closest_enemy = npc_info
+            .iter()
+            .filter(|(id, attr)| {
+                mem::discriminant(&attr.team) != mem::discriminant(&self.attributes.team) && **id != self.id
+            })
+            .map(|(id, attr)| {
+                let distance = get_distance_between_points(self.get_position(), &attr.position);
+                (id, distance, attr)
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1));
+        let Some(enemy) = closest_enemy else {
+            self.tasks.queue.push_front(Task::new(TaskType::FindTarget));
+            return;
+        };
+        self.knowledge.shoot_target = Some(enemy.2.position.clone());
+        self.tasks.current_action = Some(Action::Shooting);
+    }
 }
 
 #[derive(Clone)]
@@ -407,6 +464,7 @@ pub struct Task {
 pub enum TaskType {
     Move(Point),
     FindCloseCover,
+    FindTarget,
 }
 
 impl Task {
@@ -417,6 +475,7 @@ impl Task {
 
 enum Action {
     Moving,
+    Shooting,
 }
 
 pub fn render_npcs<'a, G: Graphics>(

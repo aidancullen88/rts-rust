@@ -11,10 +11,12 @@ mod cover;
 mod npc;
 mod point;
 mod vector;
+mod effect;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use glutin_window::GlutinWindow as Window;
+use graphics::{Context, Graphics};
 use opengl_graphics::{GlGraphics, GlyphCache, OpenGL};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent};
@@ -23,7 +25,8 @@ use piston::{Button, ButtonState, GenericEvent, MouseButton};
 
 use crate::cell_map::Cells;
 use crate::cover::Cover;
-use crate::npc::{Id, Task, TaskType};
+use crate::effect::Effect;
+use crate::npc::{Id, NpcTeam, Task, TaskType};
 use crate::npc::{Npc, NpcMap};
 use crate::point::Point;
 
@@ -34,11 +37,15 @@ macro_rules! piston_key {
     };
 }
 
+pub type EffectQueue = Vec<Box<dyn Effect<GlGraphics>>>;
+
 struct App {
     gl: GlGraphics,
     mouse_pos: [f64; 2],
     npcs: NpcMap,
     game_state: GameState,
+    // queue to render effects
+    effect_queue: EffectQueue,
     // The glyphs are init'd and stay the same throughout the program, hence 'static
     glyphs: GlyphCache<'static>,
     game_map: GameMap,
@@ -66,11 +73,12 @@ impl App {
                 &c,
                 gl,
             );
+            crate::effect::render_effects(&mut self.effect_queue, &c, gl);
         })
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        self.npcs.update_npcs(&self.game_map, &args.dt);
+        self.npcs.update_npcs(&self.game_map, &mut self.effect_queue, &args.dt);
     }
     fn control<E: GenericEvent>(&mut self, window_dims: &[u32; 2], event: &E) {
         // Save the current mouse position to use throughout the event handlers
@@ -94,14 +102,15 @@ impl App {
                 self.npcs.deselect_npc();
             } else {
                 // Set npcs that spawn on the left of the screen to look right and vice versa
-                let look_dir = if self.mouse_pos[0] <= f64::from(window_dims[0]) / 2.0 {
-                    [1.0, 0.0]
+                let (look_dir, team) = if self.mouse_pos[0] <= f64::from(window_dims[0]) / 2.0 {
+                    ([1.0, 0.0], NpcTeam::Blue)
                 } else {
-                    [-1.0, 0.0]
+                    ([-1.0, 0.0], NpcTeam::Red)
                 };
-                let new_npc_id = self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), Some(look_dir.into()), &mut self.game_state);
+                let new_npc_id = self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), Some(look_dir.into()), team, &mut self.game_state);
                 let new_npc = self.npcs.get_npc_by_id_mut(&new_npc_id).expect("We just created this npc, so should be here");
                 new_npc.queue_task(Task::new(TaskType::FindCloseCover));
+                new_npc.queue_task(Task::new(TaskType::FindTarget));
             }
         }
         if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {}
@@ -181,6 +190,7 @@ fn main() {
         game_map: GameMap {
             cover: covers,
         },
+        effect_queue: Vec::new(),
     };
 
     // let mut events = Events::new(EventSettings { max_fps: 180, ups: 180, ..EventSettings::default() });
