@@ -12,6 +12,7 @@ mod npc;
 mod point;
 mod vector;
 mod effect;
+mod event;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -26,6 +27,7 @@ use piston::{Button, ButtonState, GenericEvent, MouseButton};
 use crate::cell_map::Cells;
 use crate::cover::Cover;
 use crate::effect::Effect;
+use crate::event::EventQueue;
 use crate::npc::{Id, NpcTeam, Task, TaskType};
 use crate::npc::{Npc, NpcMap};
 use crate::point::Point;
@@ -46,6 +48,7 @@ struct App {
     game_state: GameState,
     // queue to render effects
     effect_queue: EffectQueue,
+    event_queue: EventQueue,
     // The glyphs are init'd and stay the same throughout the program, hence 'static
     glyphs: GlyphCache<'static>,
     game_map: GameMap,
@@ -78,7 +81,7 @@ impl App {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        self.npcs.update_npcs(&self.game_map, &mut self.effect_queue, &args.dt);
+        self.npcs.update_npcs(&self.game_map, &mut self.effect_queue, &mut self.event_queue, &args.dt);
     }
     fn control<E: GenericEvent>(&mut self, window_dims: &[u32; 2], event: &E) {
         // Save the current mouse position to use throughout the event handlers
@@ -198,6 +201,7 @@ fn main() {
             cover: covers,
         },
         effect_queue: Vec::new(),
+        event_queue: EventQueue::new(),
     };
 
     // let mut events = Events::new(EventSettings { max_fps: 180, ups: 180, ..EventSettings::default() });

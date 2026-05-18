@@ -4,6 +4,7 @@ use std::mem;
 
 use crate::EffectQueue;
 use crate::effect::Bullet;
+use crate::event::{Event, EventQueue, EventType};
 use crate::point::get_distance_between_points;
 use crate::vector::get_direction_between_points;
 use crate::{
@@ -104,10 +105,10 @@ impl NpcMap {
         self.cell_map.clear();
     }
 
-    pub fn update_npcs(&mut self, game_map: &GameMap, effects: &mut crate::EffectQueue, dt: &f64) {
+    pub fn update_npcs(&mut self, game_map: &GameMap, effects: &mut crate::EffectQueue, event_queue: &mut EventQueue, dt: &f64) {
         let npc_info = self.get_npc_info_map();
         for npc in self.map.values_mut() {
-            npc.act(&mut self.cell_map, game_map, &npc_info, effects, dt);
+            npc.act(&mut self.cell_map, game_map, &npc_info, effects, event_queue, dt);
         }
     }
 }
@@ -227,12 +228,13 @@ impl Npc {
         game_map: &GameMap,
         npc_info: &HashMap<Id, NpcAttributes>,
         effects: &mut EffectQueue,
+        event_queue: &mut EventQueue,
         dt: &f64,
     ) {
         if let Some(action) = &self.tasks.current_action {
             match action {
                 Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
-                Action::Shooting => self.shoot(cells, npc_info, effects),
+                Action::Shooting => self.shoot(cells, npc_info, effects, event_queue),
             }
         } else {
             self.setup_next_task(cells, game_map, npc_info);
@@ -308,18 +310,21 @@ impl Npc {
         self.update_position(cells, new_pos);
     }
 
-    fn shoot(&mut self, cells: &Cells, npc_info: &HashMap<Id, NpcAttributes>, effects: &mut EffectQueue) {
+    fn shoot(&mut self, cells: &Cells, npc_info: &HashMap<Id, NpcAttributes>, effects: &mut EffectQueue, event_queue: &mut EventQueue) {
         println!("{} is shooting", self.id);
         let shoot_dir = self.knowledge.shoot_dir.as_ref().expect("Shouldn't be shooting without a target!");
         // get unified list of all entity positions and bounds
         // cast ray and get first collision
-        let end_pos = cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &vec![self.id]).map(|(id, pos)| pos);
-        println!("target_hit (should always be true!): {:#?}", end_pos);
+        let hit_option = cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &vec![self.id]);
+        println!("target_hit (should always be true!): {:#?}", hit_option);
+        if let Some((id, _)) = hit_option {
+            event_queue.add_event(*id, Event::Instant(EventType::Shot(100.0)));
+        }
         // Calculate start and end point based off collisions
         effects.push(Box::new(Bullet::new(
             self.get_position(),
             &shoot_dir,
-            end_pos
+            hit_option.map(|(id, pos)| pos)
         )));
         self.end_current_action();
     }
