@@ -296,10 +296,19 @@ impl Npc {
         event_queue: &mut EventQueue,
         dt: &f64,
     ) {
-        if let Some(action) = &self.tasks.current_action {
+        if let Some(action) = &mut self.tasks.current_action {
             match action {
                 Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
-                Action::Shooting => self.shoot(cells, npc_info, effects, event_queue),
+                // This won't work as the targeting needs to happen after the timer!
+                Action::Shooting(timer) => {
+                    if *timer > 0.0 {
+                        println!("timer: {}, dt: {}", timer, dt);
+                        *timer -= dt;
+                    } else {
+                        println!("shooting: timer: {}", timer);
+                        self.shoot(cells, npc_info, effects, event_queue);
+                    }
+                }
             }
         } else {
             self.setup_next_task(cells, game_map, npc_info);
@@ -552,7 +561,9 @@ impl Npc {
             .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
         // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
         self.knowledge.shoot_dir = Some(shoot_dir);
-        self.tasks.current_action = Some(Action::Shooting);
+        // This is a temp const, this would be determined by weapon/xp/etc
+        const SHOOT_TIMER: f64 = 10.0;
+        self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
     }
 }
 
@@ -576,7 +587,7 @@ impl Task {
 
 enum Action {
     Moving,
-    Shooting,
+    Shooting(f64),
 }
 
 pub fn render_npcs<'a, G: Graphics>(
