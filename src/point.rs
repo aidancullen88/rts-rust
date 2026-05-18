@@ -1,3 +1,5 @@
+use crate::vector::Vector;
+
 #[derive(Clone, Debug)]
 pub struct Point {
     pub x: f64,
@@ -7,6 +9,12 @@ pub struct Point {
 impl Point {
     pub fn new(x: f64, y: f64) -> Point {
         Point { x, y }
+    }
+    pub fn sub(&self, p: &Point) -> Point {
+        Point::new(self.x - p.x, self.y - p.y)
+    }
+    pub fn into_vec(&self) -> Vector {
+        Vector::new(self.x, self.y)
     }
 }
 

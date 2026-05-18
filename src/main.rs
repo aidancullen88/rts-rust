@@ -73,7 +73,7 @@ impl App {
                 &c,
                 gl,
             );
-            crate::effect::render_effects(&mut self.effect_queue, &c, gl);
+            crate::effect::render_effects(&mut self.effect_queue, &c, gl, args.ext_dt);
         })
     }
 
@@ -113,7 +113,14 @@ impl App {
                 new_npc.queue_task(Task::new(TaskType::FindTarget));
             }
         }
-        if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {}
+        if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {
+            if let Some(npc_id) = self.npcs.cell_map.check_if_point_target_collides_with_npc(
+                &self.mouse_pos.into(),
+                &self.npcs.get_npc_info_map(),
+            ) {
+                    self.npcs.delete_npc(&npc_id);
+            }
+        }
         if let Some(button_args) = event.button_args() {
             match (button_args.button, button_args.state) {
                 (piston_key!(P), ButtonState::Press) => {

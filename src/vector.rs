@@ -1,9 +1,14 @@
-use crate::point::Point;
+use std::f64::{
+    self,
+    consts::{FRAC_PI_2, PI},
+};
+
+use crate::point::{Point, is_point_distance_leq};
 
 #[derive(Clone, Debug)]
 pub struct Vector {
-    x: f64,
-    y: f64,
+    pub x: f64,
+    pub y: f64,
 }
 
 impl Vector {
@@ -16,6 +21,21 @@ impl Vector {
         self.x = self.x / mag;
         self.y = self.y / mag;
         self
+    }
+
+    pub fn angle(&self) -> f64 {
+        let mut quad_rad = self.y.atan2(self.x);
+        if quad_rad <= 0.0 {
+            quad_rad += 2.0 * f64::consts::PI;
+        }
+        return quad_rad;
+    }
+    
+    pub fn dot(&self, v: &Vector) -> f64 {
+        (self.x * v.x) + (self.y * v.y)
+    }
+    pub fn sub(&self, v: &Vector) -> Vector {
+        Vector::new(self.x - v.x, self.y - v.y)
     }
 }
 
@@ -67,3 +87,48 @@ pub fn get_direction_between_points(a: &Point, b: &Point) -> Vector {
 pub fn reverse_vector(v: &Vector) -> Vector {
     Vector { x: -v.x, y: -v.y }
 }
+
+pub enum Quad {
+    LeftUp,
+    RightUp,
+    RightDown,
+    LeftDown,
+}
+
+pub fn get_vector_quad(v: &Vector) -> Option<Quad> {
+    if v.x == 0.0 && v.y == 0.0 {
+        return None;
+    }
+    let angle = v.angle();
+    if angle < FRAC_PI_2 {
+        Some(Quad::LeftUp)
+    } else if angle < PI {
+        Some(Quad::RightUp)
+    } else if angle < FRAC_PI_2 * 3.0 {
+        Some(Quad::RightDown)
+    } else {
+        Some(Quad::LeftDown)
+    }
+}
+
+pub fn check_ray_collides_circle(origin: &Point, direction: &Vector, circle_pos: &Point, circle_radius: f64) -> bool {
+    let vec_npc_origin = circle_pos.sub(origin).into_vec();
+    let circle_projection = vec_npc_origin.dot(direction).max(0.0);
+    let closest = translate_point_direction_distance(origin, direction, circle_projection);
+    is_point_distance_leq(circle_pos, &closest, circle_radius)
+}
+
+///// Given 3 vectors (assumed to be with the same origin), returns true if v is at an angle between
+///// the other two
+// pub fn vector_is_between(v: &Vector, a: &Vector, b: &Vector) -> bool {
+//     const FLOAT_TOLERANCE: f64 = 1e-6;
+//     let (v_rad, a_rad, b_rad) = (v.angle(), a.angle(), b.angle());
+//     // If the
+//     if (a_rad - b_rad).abs() < FLOAT_TOLERANCE {
+//         return false;
+//     }
+//     if ((a_rad - b_rad).abs() - PI).abs() < FLOAT_TOLERANCE {
+//         return false;
+//     }
+//     v_rad >= a_rad.min(b_rad) && v_rad <= a_rad.max(b_rad)
+// }

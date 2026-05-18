@@ -5,6 +5,12 @@ use crate::npc::NpcAttributes;
 use crate::npc::{Id, Npc, NpcMap};
 use crate::point;
 use crate::point::Point;
+use crate::point::get_distance_between_points;
+use crate::vector::Quad;
+use crate::vector::Vector;
+use crate::vector::check_ray_collides_circle;
+use crate::vector::get_direction_between_points;
+use crate::vector::get_vector_quad;
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct CellPos(pub u32, pub u32);
@@ -49,7 +55,7 @@ impl Cells {
     }
     /// Remove an item from the given cell. If the cell is now empty, remove the whole hashmap
     /// entry
-    fn remove_from_cell(&mut self, cell: &CellPos, item_id: &Id) {
+    pub fn remove_from_cell(&mut self, cell: &CellPos, item_id: &Id) {
         if let Some(item_set) = self.cells.get_mut(cell) {
             item_set.remove(item_id);
             // If there's nothing left in the hashset, remove the whole hashmap entry. Keeps the size of
@@ -109,14 +115,21 @@ impl Cells {
         init_cell
     }
 
-    pub fn check_if_npc_target_collides_with_npc(&self, target_pos: &Point, npc_info: &HashMap<Id, NpcAttributes>, npc_radius: f64) -> Option<Id> {
+    pub fn check_if_npc_target_collides_with_npc(
+        &self,
+        target_pos: &Point,
+        npc_info: &HashMap<Id, NpcAttributes>,
+        npc_radius: f64,
+    ) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
             .and_then(|entity_list| {
                 entity_list
                     .iter()
                     .filter(|e| {
-                        let current_npc_info = &npc_info.get(&e).expect("Npc shouldn't be missing from info map");
+                        let current_npc_info = &npc_info
+                            .get(&e)
+                            .expect("Npc shouldn't be missing from info map");
                         point::is_point_distance_leq(
                             &current_npc_info.position,
                             target_pos,
@@ -129,14 +142,20 @@ impl Cells {
             })
     }
 
-    pub fn check_if_point_target_collides_with_npc(&self, target_pos: &Point, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
+    pub fn check_if_point_target_collides_with_npc(
+        &self,
+        target_pos: &Point,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
             .and_then(|entity_list| {
                 entity_list
                     .iter()
                     .filter(|e| {
-                        let current_npc_info = &npc_info.get(&e).expect("Npc shouldn't be missing from info map");
+                        let current_npc_info = &npc_info
+                            .get(&e)
+                            .expect("Npc shouldn't be missing from info map");
                         point::is_point_distance_leq(
                             &current_npc_info.position,
                             target_pos,
@@ -148,6 +167,67 @@ impl Cells {
                     .copied()
             })
     }
+
+    pub fn check_if_ray_collides_with_npc<'a>(
+        &self,
+        origin: &Point,
+        direction: &Vector,
+        npc_info: &'a HashMap<Id, NpcAttributes>,
+        exclude_ids: &[Id],
+    ) -> Option<(&Id, &'a Point)> {
+        // Get the start cell, figure out the quadrant direction of the ray, and then get all the
+        // cells for that quad rather than all of them
+
+        let ray_quad = get_vector_quad(direction)?;
+        let start_cell = self.calculate_cell_from_pos(origin);
+        // Check what quad we're in and filter the cells based on this e.g. for LeftTop, cellpos
+        // should be >= both x and y of the current cell
+        self.cells
+            .iter()
+            .filter(|(cell_pos, _)| match ray_quad {
+                Quad::LeftUp => cell_pos.0 >= start_cell.0 && cell_pos.1 >= start_cell.1,
+                Quad::RightUp => cell_pos.0 <= start_cell.0 && cell_pos.1 >= start_cell.1,
+                Quad::RightDown => cell_pos.0 <= start_cell.0 && cell_pos.1 <= start_cell.1,
+                Quad::LeftDown => cell_pos.0 >= start_cell.0 && cell_pos.1 <= start_cell.1,
+            })
+            .flat_map(|(_, ids)| {
+                ids.iter()
+                // Get a list of npc id's and their info (to get the positions)
+            })
+            .map(|id| {
+                (
+                    id,
+                    npc_info
+                        .get(id)
+                        .expect("npc in cell map should exist in npc_info"),
+                )
+            })
+            .filter(|(id, npc_info)| {
+                !exclude_ids.contains(id) && check_ray_collides_circle(origin, direction, &npc_info.position, npc_info.radius)
+            })
+            .next().map(|(id, npc_info)| (id, &npc_info.position))
+    }
+
+    // fn line_collides_with_cell(&self, cell: &CellPos, origin: &Point, direction: &Vector) -> bool {
+    //     let (x, y) = (cell.0 as f64 * self.cell_size, cell.1 as f64 * self.cell_size);
+    //     let sides = [
+    //         // Left
+    //         (Point::new(x, y), Point::new(x, y + self.cell_size)),
+    //         // Top
+    //         (Point::new(x, y), Point::new(x + self.cell_size, y)),
+    //         // Bottom
+    //         (Point::new(x, y + self.cell_size), Point::new(x + self.cell_size, y + self.cell_size)),
+    //         // Right
+    //         (Point::new(x + self.cell_size, y), Point::new(x + self.cell_size, y + self.cell_size)),
+    //     ];
+    //     sides.iter().filter(|(start, end)| {
+    //         let start_angle = get_direction_between_points(origin, start);
+    //         let end_angle = get_direction_between_points(origin, end);
+    //         vector_is_between(direction, &start_angle, &end_angle)
+    //     }).count() == 2
+    //     // go through sides, check if 2 collide with the line
+    //     // maybe just iterate without making the array above?
+    // }
 
     /// Given a CellPos, get the corresponding hashset of IDs for the cell (or None if the cell
     /// does not exist/isn't init'd

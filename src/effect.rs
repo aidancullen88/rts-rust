@@ -1,23 +1,29 @@
 use std::collections::VecDeque;
 
-use crate::point::Point;
+use crate::{point::Point, vector::{Vector, translate_point_direction_distance}};
 use graphics::{Context, Graphics};
 
 pub trait Effect<G: Graphics> {
     fn render(&self, c: &Context, g: &mut G);
-    fn tick(&mut self) -> bool;
+    fn tick(&mut self, dt: f64) -> bool;
     fn print(&self) -> String;
 }
 
 pub struct Bullet {
     start: Point,
     end: Point,
-    frame_duration: usize,
+    duration: f64,
 }
 
 impl Bullet {
-    pub fn new(start: Point, end: Point) -> Bullet {
-        Bullet { start, end, frame_duration: 5 }
+    pub fn new(origin: &Point, direction: &Vector, end: Option<&Point>) -> Bullet {
+        const DURATION: f64 = 0.005;
+        if let Some(end_point) = end {
+            Bullet { start: origin.clone(), end: end_point.clone(), duration: DURATION }
+        } else {
+            let end_point = translate_point_direction_distance(origin, direction, 500.0);
+            Bullet { start: origin.clone(), end: end_point, duration: DURATION }
+        }
     }
 }
 
@@ -31,11 +37,11 @@ impl <G: Graphics>Effect<G> for Bullet {
             g,
         );
     }
-    fn tick(&mut self) -> bool {
-        if self.frame_duration == 1 { 
-            return true
-        };
-        self.frame_duration -= 1;
+    fn tick(&mut self, dt: f64) -> bool {
+        self.duration -= 1.0 * dt;
+        if self.duration <= 0.0 {
+            return true;
+        }
         false
     }
     fn print(&self) -> String {
@@ -43,9 +49,9 @@ impl <G: Graphics>Effect<G> for Bullet {
     }
 }
 
-pub fn render_effects<G: Graphics>(effects: &mut Vec<Box<dyn Effect<G>>>, c: &Context, g: &mut G) {
+pub fn render_effects<G: Graphics>(effects: &mut Vec<Box<dyn Effect<G>>>, c: &Context, g: &mut G, dt: f64) {
     effects.retain_mut(|effect| {
         effect.render(c, g);
-        !effect.tick()
+        !effect.tick(dt)
     });
 }

@@ -5,6 +5,7 @@ use std::mem;
 use crate::EffectQueue;
 use crate::effect::Bullet;
 use crate::point::get_distance_between_points;
+use crate::vector::get_direction_between_points;
 use crate::{
     GameMap, GameState,
     cell_map::{self, CellPos, Cells},
@@ -83,6 +84,12 @@ impl NpcMap {
     pub fn deselect_npc(&mut self) {
         self.selected = None;
     }
+    
+    pub fn delete_npc(&mut self, id: &Id) {
+        let npc_cell = self.get_npc_by_id(&id).expect("Should def be an npc with this id").knowledge.current_cell.clone();
+        self.map.remove(id);
+        self.cell_map.remove_from_cell(&npc_cell, id);
+    }
 
     pub fn get_selected_npc(&mut self) -> Option<&mut Npc> {
         self.selected.and_then(|s| self.map.get_mut(&s))
@@ -128,7 +135,7 @@ struct NpcKnowledge {
     enemy_direction: Option<Vector>,
     cover_target: Option<Id>,
     full_covers: HashSet<Id>,
-    shoot_target: Option<Point>,
+    shoot_dir: Option<Vector>,
 }
 
 struct NpcTasks {
@@ -163,7 +170,7 @@ impl Npc {
                 enemy_direction: None,
                 cover_target: None,
                 full_covers: HashSet::new(),
-                shoot_target: None,
+                shoot_dir: None,
             },
             look_dir: [1.0, 0.0].into(),
             tasks: NpcTasks {
@@ -225,7 +232,7 @@ impl Npc {
         if let Some(action) = &self.tasks.current_action {
             match action {
                 Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
-                Action::Shooting => self.shoot(effects),
+                Action::Shooting => self.shoot(cells, npc_info, effects),
             }
         } else {
             self.setup_next_task(cells, game_map, npc_info);
@@ -301,13 +308,18 @@ impl Npc {
         self.update_position(cells, new_pos);
     }
 
-    fn shoot(&mut self, effects: &mut EffectQueue) {
+    fn shoot(&mut self, cells: &Cells, npc_info: &HashMap<Id, NpcAttributes>, effects: &mut EffectQueue) {
+        println!("{} is shooting", self.id);
+        let shoot_dir = self.knowledge.shoot_dir.as_ref().expect("Shouldn't be shooting without a target!");
+        // get unified list of all entity positions and bounds
+        // cast ray and get first collision
+        let end_pos = cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &vec![self.id]).map(|(id, pos)| pos);
+        println!("target_hit (should always be true!): {:#?}", end_pos);
+        // Calculate start and end point based off collisions
         effects.push(Box::new(Bullet::new(
-            self.get_position().clone(),
-            self.knowledge
-                .shoot_target
-                .clone()
-                .expect("Shouldn't be shooting without a target"),
+            self.get_position(),
+            &shoot_dir,
+            end_pos
         )));
         self.end_current_action();
     }
@@ -438,6 +450,7 @@ impl Npc {
         // Get the closest N
         let closest_enemy = npc_info
             .iter()
+            // Only check npcs on the other team
             .filter(|(id, attr)| {
                 mem::discriminant(&attr.team) != mem::discriminant(&self.attributes.team) && **id != self.id
             })
@@ -450,7 +463,9 @@ impl Npc {
             self.tasks.queue.push_front(Task::new(TaskType::FindTarget));
             return;
         };
-        self.knowledge.shoot_target = Some(enemy.2.position.clone());
+        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position);
+        // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
+        self.knowledge.shoot_dir = Some(shoot_dir);
         self.tasks.current_action = Some(Action::Shooting);
     }
 }
