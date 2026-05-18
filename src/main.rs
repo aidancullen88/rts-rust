@@ -138,6 +138,9 @@ impl App {
                         selected_npc.queue_task(Task::new(TaskType::FindCloseCover));
                     }
                 }
+                (piston_key!(S), ButtonState::Press) => {
+                    self.npcs.queue_task_all_npcs(Task::new(TaskType::FindTarget));
+                }
                 _ => (),
             }
         }

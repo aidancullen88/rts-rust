@@ -86,9 +86,14 @@ impl NpcMap {
     pub fn deselect_npc(&mut self) {
         self.selected = None;
     }
-    
+
     pub fn delete_npc(&mut self, id: &Id) {
-        let npc_cell = self.get_npc_by_id(&id).expect("Should def be an npc with this id").knowledge.current_cell.clone();
+        let npc_cell = self
+            .get_npc_by_id(&id)
+            .expect("Should def be an npc with this id")
+            .knowledge
+            .current_cell
+            .clone();
         self.map.remove(id);
         self.cell_map.remove_from_cell(&npc_cell, id);
     }
@@ -110,18 +115,41 @@ impl NpcMap {
         self.map.get_mut(id)
     }
 
-    pub fn update_npcs(&mut self, game_map: &GameMap, effects: &mut crate::EffectQueue, event_queue: &mut EventQueue, dt: &f64) {
+    pub fn queue_task_all_npcs(&mut self, task: Task) {
+        for npc in self.map.values_mut() {
+            if !matches!(npc.attributes.status, NpcStatus::Dead) {
+                npc.queue_task(task.clone());
+            }
+        }
+    }
+
+    pub fn update_npcs(
+        &mut self,
+        game_map: &GameMap,
+        effects: &mut crate::EffectQueue,
+        event_queue: &mut EventQueue,
+        dt: &f64,
+    ) {
         while let Some((id, event)) = event_queue.get_next_event() {
-            let npc = self.get_mut_npc_by_id(&id).expect("Event for npc that doesn't exist, was it deleted?");
+            let npc = self
+                .get_mut_npc_by_id(&id)
+                .expect("Event for npc that doesn't exist, was it deleted?");
             match event {
                 Event::Instant(etype) => match etype {
                     EventType::Shot(_) => npc.kill(),
-                }
+                },
             }
-        };
+        }
         let npc_info = self.get_npc_info_map();
         for npc in self.map.values_mut() {
-            npc.act(&mut self.cell_map, game_map, &npc_info, effects, event_queue, dt);
+            npc.act(
+                &mut self.cell_map,
+                game_map,
+                &npc_info,
+                effects,
+                event_queue,
+                dt,
+            );
         }
     }
 }
@@ -131,7 +159,6 @@ pub struct Npc {
     knowledge: NpcKnowledge,
     look_dir: Vector,
     tasks: NpcTasks,
-    status: NpcStatus,
     attributes: NpcAttributes,
 }
 
@@ -142,6 +169,7 @@ pub struct NpcAttributes {
     pub radius: f64,
     pub position: Point,
     pub team: NpcTeam,
+    pub status: NpcStatus,
 }
 
 struct NpcKnowledge {
@@ -158,7 +186,8 @@ struct NpcTasks {
     queue: std::collections::VecDeque<Task>,
 }
 
-enum NpcStatus {
+#[derive(Clone)]
+pub enum NpcStatus {
     Alive,
     Dead,
 }
@@ -203,13 +232,13 @@ impl Npc {
                 radius: 10.0,
                 position: pos,
                 team,
+                status: NpcStatus::Alive,
             },
-            status: NpcStatus::Alive,
         }
     }
 
     pub fn kill(&mut self) {
-        self.status = NpcStatus::Dead;
+        self.attributes.status = NpcStatus::Dead;
         self.tasks.current_action = None;
         self.tasks.queue.clear();
     }
@@ -237,6 +266,10 @@ impl Npc {
 
     pub fn get_id(&self) -> Id {
         self.id
+    }
+
+    pub fn get_team(&self) -> &NpcTeam {
+        &self.attributes.team
     }
 
     // pub fn check_target_position(&self, cells: &Cells, new_pos: &Point) -> bool {
@@ -342,12 +375,23 @@ impl Npc {
         self.update_position(cells, new_pos);
     }
 
-    fn shoot(&mut self, cells: &Cells, npc_info: &HashMap<Id, NpcAttributes>, effects: &mut EffectQueue, event_queue: &mut EventQueue) {
+    fn shoot(
+        &mut self,
+        cells: &Cells,
+        npc_info: &HashMap<Id, NpcAttributes>,
+        effects: &mut EffectQueue,
+        event_queue: &mut EventQueue,
+    ) {
         println!("{} is shooting", self.id);
-        let shoot_dir = self.knowledge.shoot_dir.as_ref().expect("Shouldn't be shooting without a target!");
+        let shoot_dir = self
+            .knowledge
+            .shoot_dir
+            .as_ref()
+            .expect("Shouldn't be shooting without a target!");
         // get unified list of all entity positions and bounds
         // cast ray and get first collision
-        let hit_option = cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &vec![self.id]);
+        let hit_option =
+            cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &self);
         println!("target_hit (should always be true!): {:#?}", hit_option);
         if let Some((id, _)) = hit_option {
             event_queue.add_event(*id, Event::Instant(EventType::Shot(100.0)));
@@ -356,7 +400,7 @@ impl Npc {
         effects.push(Box::new(Bullet::new(
             self.get_position(),
             &shoot_dir,
-            hit_option.map(|(id, pos)| pos)
+            hit_option.map(|(id, pos)| pos),
         )));
         self.end_current_action();
     }
@@ -489,7 +533,10 @@ impl Npc {
             .iter()
             // Only check npcs on the other team
             .filter(|(id, attr)| {
-                mem::discriminant(&attr.team) != mem::discriminant(&self.attributes.team) && **id != self.id
+                mem::discriminant(&attr.team) != mem::discriminant(&self.attributes.team)
+                    && **id != self.id
+                    // Don't target dead npcs
+                    && !matches!(attr.status, NpcStatus::Dead)
             })
             .map(|(id, attr)| {
                 let distance = get_distance_between_points(self.get_position(), &attr.position);
@@ -501,7 +548,8 @@ impl Npc {
             return;
         };
         // Get the shoot direction and also move it by between +- PI/4
-        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position).rotate((fastrand::f64() - 0.5) * (PI / 16.0));
+        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position)
+            .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
         // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
         self.knowledge.shoot_dir = Some(shoot_dir);
         self.tasks.current_action = Some(Action::Shooting);
@@ -540,10 +588,10 @@ pub fn render_npcs<'a, G: Graphics>(
     for npc in npc_list {
         let npc_colour = match selected_npc {
             Some(id) if *id == npc.get_id() => graphics::color::RED,
-            _ => match npc.status {
+            _ => match npc.attributes.status {
                 NpcStatus::Alive => graphics::color::WHITE,
                 NpcStatus::Dead => graphics::color::GRAY,
-            }
+            },
         };
         let circum = npc.attributes.radius * 2.0;
         // Render npc circle

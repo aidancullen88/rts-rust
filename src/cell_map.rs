@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 
 use crate::npc::NpcAttributes;
+use crate::npc::NpcStatus;
 use crate::npc::{Id, Npc, NpcMap};
 use crate::point;
 use crate::point::Point;
@@ -173,7 +175,7 @@ impl Cells {
         origin: &Point,
         direction: &Vector,
         npc_info: &'a HashMap<Id, NpcAttributes>,
-        exclude_ids: &[Id],
+        current_npc: &Npc,
     ) -> Option<(&Id, &'a Point)> {
         // Get the start cell, figure out the quadrant direction of the ray, and then get all the
         // cells for that quad rather than all of them
@@ -203,9 +205,20 @@ impl Cells {
                 )
             })
             .filter(|(id, npc_info)| {
-                !exclude_ids.contains(id) && check_ray_collides_circle(origin, direction, &npc_info.position, npc_info.radius)
+                // Usually used for the current npc
+                **id != current_npc.get_id()
+                    && mem::discriminant(&npc_info.team) != mem::discriminant(current_npc.get_team())
+                    // Don't collide with dead npcs
+                    && !matches!(npc_info.status, NpcStatus::Dead)
+                    && check_ray_collides_circle(
+                        origin,
+                        direction,
+                        &npc_info.position,
+                        npc_info.radius,
+                    )
             })
-            .next().map(|(id, npc_info)| (id, &npc_info.position))
+            .next()
+            .map(|(id, npc_info)| (id, &npc_info.position))
     }
 
     // fn line_collides_with_cell(&self, cell: &CellPos, origin: &Point, direction: &Vector) -> bool {
