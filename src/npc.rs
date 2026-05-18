@@ -1,5 +1,6 @@
 use graphics::{Context, Graphics};
 use std::collections::{HashMap, HashSet};
+use std::f64::consts::PI;
 use std::mem;
 
 use crate::EffectQueue;
@@ -105,7 +106,19 @@ impl NpcMap {
         self.cell_map.clear();
     }
 
+    pub fn get_mut_npc_by_id(&mut self, id: &Id) -> Option<&mut Npc> {
+        self.map.get_mut(id)
+    }
+
     pub fn update_npcs(&mut self, game_map: &GameMap, effects: &mut crate::EffectQueue, event_queue: &mut EventQueue, dt: &f64) {
+        while let Some((id, event)) = event_queue.get_next_event() {
+            let npc = self.get_mut_npc_by_id(&id).expect("Event for npc that doesn't exist, was it deleted?");
+            match event {
+                Event::Instant(etype) => match etype {
+                    EventType::Shot(_) => npc.kill(),
+                }
+            }
+        };
         let npc_info = self.get_npc_info_map();
         for npc in self.map.values_mut() {
             npc.act(&mut self.cell_map, game_map, &npc_info, effects, event_queue, dt);
@@ -118,6 +131,7 @@ pub struct Npc {
     knowledge: NpcKnowledge,
     look_dir: Vector,
     tasks: NpcTasks,
+    status: NpcStatus,
     attributes: NpcAttributes,
 }
 
@@ -142,6 +156,11 @@ struct NpcKnowledge {
 struct NpcTasks {
     current_action: Option<Action>,
     queue: std::collections::VecDeque<Task>,
+}
+
+enum NpcStatus {
+    Alive,
+    Dead,
 }
 
 #[derive(Clone)]
@@ -185,7 +204,14 @@ impl Npc {
                 position: pos,
                 team,
             },
+            status: NpcStatus::Alive,
         }
+    }
+
+    pub fn kill(&mut self) {
+        self.status = NpcStatus::Dead;
+        self.tasks.current_action = None;
+        self.tasks.queue.clear();
     }
 
     pub fn set_look_dir(&mut self, look_dir: Vector) {
@@ -221,6 +247,12 @@ impl Npc {
     pub fn get_current_task(&self) -> Option<&Task> {
         self.tasks.queue.front()
     }
+
+    // fn process_event(&mut self, event_type: &EventType) {
+    //     match event_type {
+    //         EventType::Shot(_) =>
+    //     }
+    // }
 
     fn act(
         &mut self,
@@ -468,7 +500,8 @@ impl Npc {
             self.tasks.queue.push_front(Task::new(TaskType::FindTarget));
             return;
         };
-        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position);
+        // Get the shoot direction and also move it by between +- PI/4
+        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position).rotate((fastrand::f64() - 0.5) * (PI / 16.0));
         // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
         self.knowledge.shoot_dir = Some(shoot_dir);
         self.tasks.current_action = Some(Action::Shooting);
@@ -507,7 +540,10 @@ pub fn render_npcs<'a, G: Graphics>(
     for npc in npc_list {
         let npc_colour = match selected_npc {
             Some(id) if *id == npc.get_id() => graphics::color::RED,
-            _ => graphics::color::WHITE,
+            _ => match npc.status {
+                NpcStatus::Alive => graphics::color::WHITE,
+                NpcStatus::Dead => graphics::color::GRAY,
+            }
         };
         let circum = npc.attributes.radius * 2.0;
         // Render npc circle

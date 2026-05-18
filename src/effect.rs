@@ -21,7 +21,7 @@ impl Bullet {
         if let Some(end_point) = end {
             Bullet { start: origin.clone(), end: end_point.clone(), duration: DURATION }
         } else {
-            let end_point = translate_point_direction_distance(origin, direction, 500.0);
+            let end_point = translate_point_direction_distance(origin, direction, 2000.0);
             Bullet { start: origin.clone(), end: end_point, duration: DURATION }
         }
     }

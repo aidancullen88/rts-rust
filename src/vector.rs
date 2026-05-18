@@ -37,6 +37,12 @@ impl Vector {
     pub fn sub(&self, v: &Vector) -> Vector {
         Vector::new(self.x - v.x, self.y - v.y)
     }
+    pub fn rotate(&self, theta: f64) -> Vector {
+        Vector::new(
+            (self.x * theta.cos()) - (self.y * theta.sin()),
+            (self.x * theta.sin()) + (self.y * theta.cos()),
+        )
+    }
 }
 
 impl From<Vector> for [f64; 2] {
