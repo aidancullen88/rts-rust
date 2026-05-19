@@ -125,6 +125,7 @@ impl Cells {
     ) -> Option<Id> {
         let target_cell = self.calculate_cell_from_pos(target_pos);
         self.get_adjacent_entities(&target_cell)
+            // Immediately return if there's nothing adjacent
             .and_then(|entity_list| {
                 entity_list
                     .iter()
@@ -176,7 +177,7 @@ impl Cells {
         direction: &Vector,
         npc_info: &'a HashMap<Id, NpcAttributes>,
         current_npc: &Npc,
-    ) -> Option<(&Id, &'a Point)> {
+    ) -> Option<(&Id, Point, &'a Point)> {
         // Get the start cell, figure out the quadrant direction of the ray, and then get all the
         // cells for that quad rather than all of them
 
@@ -192,10 +193,11 @@ impl Cells {
                 Quad::RightDown => cell_pos.0 <= start_cell.0 && cell_pos.1 <= start_cell.1,
                 Quad::LeftDown => cell_pos.0 >= start_cell.0 && cell_pos.1 <= start_cell.1,
             })
+            // Flatten the list of npcs from the cells into a list of ids
             .flat_map(|(_, ids)| {
                 ids.iter()
-                // Get a list of npc id's and their info (to get the positions)
             })
+            // Get the npc_info for each id and add it to the list
             .map(|id| {
                 (
                     id,
@@ -204,21 +206,25 @@ impl Cells {
                         .expect("npc in cell map should exist in npc_info"),
                 )
             })
-            .filter(|(id, npc_info)| {
+            // Filter the list by some pre-conditions, and finally the collision check with the ray
+            .filter_map(|(id, npc_info)| {
                 // Usually used for the current npc
-                **id != current_npc.get_id()
-                    && mem::discriminant(&npc_info.team) != mem::discriminant(current_npc.get_team())
+                if *id != current_npc.get_id()
+                    && &npc_info.team != current_npc.get_team()
                     // Don't collide with dead npcs
-                    && !matches!(npc_info.status, NpcStatus::Dead)
-                    && check_ray_collides_circle(
+                    && !matches!(npc_info.status, NpcStatus::Dead) {
+                        return None;
+                };
+                check_ray_collides_circle(
                         origin,
                         direction,
                         &npc_info.position,
                         npc_info.radius,
-                    )
+                    ).and_then(|point| Some((id, point, &npc_info.position)))
             })
+            // Get the first npc the ray collides with
             .next()
-            .map(|(id, npc_info)| (id, &npc_info.position))
+            // Return the (id, position) pair
     }
 
     // fn line_collides_with_cell(&self, cell: &CellPos, origin: &Point, direction: &Vector) -> bool {

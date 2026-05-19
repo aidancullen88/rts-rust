@@ -186,13 +186,13 @@ struct NpcTasks {
     queue: std::collections::VecDeque<Task>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum NpcStatus {
     Alive,
     Dead,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum NpcTeam {
     Blue,
     Red,
@@ -301,12 +301,12 @@ impl Npc {
                 Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
                 // This won't work as the targeting needs to happen after the timer!
                 Action::Shooting(timer) => {
-                    if *timer > 0.0 {
-                        println!("timer: {}, dt: {}", timer, dt);
-                        *timer -= dt;
-                    } else {
-                        println!("shooting: timer: {}", timer);
+                    if timer.current == 0.0 {
                         self.shoot(cells, npc_info, effects, event_queue);
+                    } else if timer.current >= timer.limit {
+                        self.end_current_action();
+                    } else {
+                        timer.current += dt;
                     }
                 }
             }
@@ -391,7 +391,7 @@ impl Npc {
         effects: &mut EffectQueue,
         event_queue: &mut EventQueue,
     ) {
-        println!("{} is shooting", self.id);
+        // println!("{} is shooting", self.id);
         let shoot_dir = self
             .knowledge
             .shoot_dir
@@ -401,17 +401,19 @@ impl Npc {
         // cast ray and get first collision
         let hit_option =
             cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &self);
-        println!("target_hit (should always be true!): {:#?}", hit_option);
-        if let Some((id, _)) = hit_option {
+        // Convert the option tuple to just contain the end point as Bullet::new expects an
+        // Option<&Point> for the end point
+        let end_point = hit_option.as_ref().map(|t| &t.1);
+        // println!("target_hit (should always be true!): {:#?}", hit_option);
+        if let Some((id, _, _)) = hit_option {
             event_queue.add_event(*id, Event::Instant(EventType::Shot(100.0)));
         }
         // Calculate start and end point based off collisions
         effects.push(Box::new(Bullet::new(
             self.get_position(),
             &shoot_dir,
-            hit_option.map(|(id, pos)| pos),
+            end_point,
         )));
-        self.end_current_action();
     }
 
     fn target_move(&mut self, target_point: &Point) {
@@ -540,9 +542,10 @@ impl Npc {
         // Get the closest N
         let closest_enemy = npc_info
             .iter()
-            // Only check npcs on the other team
             .filter(|(id, attr)| {
-                mem::discriminant(&attr.team) != mem::discriminant(&self.attributes.team)
+                // Only check npcs on the other team
+                &attr.team != &self.attributes.team
+                    // Don't target itself
                     && **id != self.id
                     // Don't target dead npcs
                     && !matches!(attr.status, NpcStatus::Dead)
@@ -563,7 +566,7 @@ impl Npc {
         self.knowledge.shoot_dir = Some(shoot_dir);
         // This is a temp const, this would be determined by weapon/xp/etc
         const SHOOT_TIMER: f64 = 10.0;
-        self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
+        self.tasks.current_action = Some(Action::Shooting(Timer::new(SHOOT_TIMER)));
     }
 }
 
@@ -587,7 +590,18 @@ impl Task {
 
 enum Action {
     Moving,
-    Shooting(f64),
+    Shooting(Timer),
+}
+
+struct Timer {
+    current: f64,
+    limit: f64,
+}
+
+impl Timer {
+    fn new(duration: f64) -> Timer {
+        Timer { current: 0.0, limit: duration }
+    }
 }
 
 pub fn render_npcs<'a, G: Graphics>(

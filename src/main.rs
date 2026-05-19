@@ -26,7 +26,7 @@ use piston::{Button, ButtonState, GenericEvent, MouseButton};
 
 use crate::cell_map::Cells;
 use crate::cover::Cover;
-use crate::effect::Effect;
+use crate::effect::{Effect, new_effect_queue};
 use crate::event::EventQueue;
 use crate::npc::{Id, NpcTeam, Task, TaskType};
 use crate::npc::{Npc, NpcMap};
@@ -203,7 +203,7 @@ fn main() {
         game_map: GameMap {
             cover: covers,
         },
-        effect_queue: Vec::new(),
+        effect_queue: effect::new_effect_queue(),
         event_queue: EventQueue::new(),
     };
 

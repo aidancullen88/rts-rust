@@ -117,11 +117,15 @@ pub fn get_vector_quad(v: &Vector) -> Option<Quad> {
     }
 }
 
-pub fn check_ray_collides_circle(origin: &Point, direction: &Vector, circle_pos: &Point, circle_radius: f64) -> bool {
+pub fn check_ray_collides_circle(origin: &Point, direction: &Vector, circle_pos: &Point, circle_radius: f64) -> Option<Point> {
     let vec_npc_origin = circle_pos.sub(origin).into_vec();
     let circle_projection = vec_npc_origin.dot(direction).max(0.0);
     let closest = translate_point_direction_distance(origin, direction, circle_projection);
-    is_point_distance_leq(circle_pos, &closest, circle_radius)
+    if is_point_distance_leq(circle_pos, &closest, circle_radius) {
+        Some(closest)
+    } else {
+        None
+    }
 }
 
 ///// Given 3 vectors (assumed to be with the same origin), returns true if v is at an angle between
