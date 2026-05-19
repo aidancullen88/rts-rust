@@ -94,6 +94,7 @@ pub fn reverse_vector(v: &Vector) -> Vector {
     Vector { x: -v.x, y: -v.y }
 }
 
+#[derive(Debug)]
 pub enum Quad {
     LeftUp,
     RightUp,
@@ -106,14 +107,15 @@ pub fn get_vector_quad(v: &Vector) -> Option<Quad> {
         return None;
     }
     let angle = v.angle();
+    println!("angle: {}", angle);
     if angle < FRAC_PI_2 {
-        Some(Quad::LeftUp)
-    } else if angle < PI {
-        Some(Quad::RightUp)
-    } else if angle < FRAC_PI_2 * 3.0 {
         Some(Quad::RightDown)
-    } else {
+    } else if angle < PI {
         Some(Quad::LeftDown)
+    } else if angle < FRAC_PI_2 * 3.0 {
+        Some(Quad::LeftUp)
+    } else {
+        Some(Quad::RightUp)
     }
 }
 

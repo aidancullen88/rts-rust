@@ -162,7 +162,7 @@ pub struct Npc {
     attributes: NpcAttributes,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NpcAttributes {
     pub speed: f64,
     pub vision: f64,
@@ -186,13 +186,13 @@ struct NpcTasks {
     queue: std::collections::VecDeque<Task>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum NpcStatus {
     Alive,
     Dead,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum NpcTeam {
     Blue,
     Red,
@@ -296,23 +296,30 @@ impl Npc {
         event_queue: &mut EventQueue,
         dt: &f64,
     ) {
-        if let Some(action) = &mut self.tasks.current_action {
-            match action {
-                Action::Moving => self.move_npc(cells, game_map, npc_info, dt),
-                // This won't work as the targeting needs to happen after the timer!
-                Action::Shooting(timer) => {
-                    if timer.current == 0.0 {
-                        self.shoot(cells, npc_info, effects, event_queue);
-                    } else if timer.current >= timer.limit {
-                        self.end_current_action();
-                    } else {
-                        timer.current += dt;
-                    }
+        match &mut self.tasks.current_action {
+            None => {
+                self.setup_next_task(cells, game_map, npc_info);
+                return;
+            },
+            Some(Action::Moving) => self.move_npc(cells, game_map, npc_info, dt),
+            Some(Action::Shooting(timer)) => {
+                // Only shoot at the start of the action
+                if timer.current == 0.0 {
+                    self.shoot(cells, npc_info, effects, event_queue)
                 }
             }
-        } else {
-            self.setup_next_task(cells, game_map, npc_info);
-        }
+        };
+        match &mut self.tasks.current_action {
+            None => {},
+            Some(Action::Moving) => {},
+            Some(Action::Shooting(timer)) => {
+                if timer.current >= timer.limit {
+                    self.end_current_action();
+                } else {
+                    timer.current += dt;
+                }
+            },
+        };
     }
 
     pub fn setup_next_task(
@@ -414,6 +421,7 @@ impl Npc {
             &shoot_dir,
             end_point,
         )));
+        println!("Bang");
     }
 
     fn target_move(&mut self, target_point: &Point) {
@@ -565,7 +573,7 @@ impl Npc {
         // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
         self.knowledge.shoot_dir = Some(shoot_dir);
         // This is a temp const, this would be determined by weapon/xp/etc
-        const SHOOT_TIMER: f64 = 10.0;
+        const SHOOT_TIMER: f64 = 1.0;
         self.tasks.current_action = Some(Action::Shooting(Timer::new(SHOOT_TIMER)));
     }
 }
@@ -600,7 +608,10 @@ struct Timer {
 
 impl Timer {
     fn new(duration: f64) -> Timer {
-        Timer { current: 0.0, limit: duration }
+        Timer {
+            current: 0.0,
+            limit: duration,
+        }
     }
 }
 
