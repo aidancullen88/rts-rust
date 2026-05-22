@@ -4,6 +4,7 @@ use std::f64::consts::PI;
 use std::mem;
 
 use crate::EffectQueue;
+use crate::cover::get_closest_advancing_cover;
 use crate::effect::Bullet;
 use crate::event::{Event, EventQueue, EventType};
 use crate::point::get_distance_between_points;
@@ -178,7 +179,8 @@ struct NpcKnowledge {
     enemy_direction: Option<Vector>,
     cover_target: Option<Id>,
     full_covers: HashSet<Id>,
-    shoot_dir: Option<Vector>,
+    enemy_target: Option<Id>,
+    current_cover: Option<Id>,
 }
 
 struct NpcTasks {
@@ -219,7 +221,8 @@ impl Npc {
                 enemy_direction: None,
                 cover_target: None,
                 full_covers: HashSet::new(),
-                shoot_dir: None,
+                enemy_target: None,
+                current_cover: None,
             },
             look_dir: [1.0, 0.0].into(),
             tasks: NpcTasks {
@@ -296,6 +299,9 @@ impl Npc {
         event_queue: &mut EventQueue,
         dt: &f64,
     ) {
+        if matches!(self.attributes.status, NpcStatus::Dead) {
+            return;
+        }
         match &mut self.tasks.current_action {
             None => {
                 self.setup_next_task(cells, game_map, npc_info);
@@ -304,21 +310,13 @@ impl Npc {
             Some(Action::Moving) => self.move_npc(cells, game_map, npc_info, dt),
             Some(Action::Shooting(timer)) => {
                 // Only shoot at the start of the action
-                if timer.current == 0.0 {
-                    self.shoot(cells, npc_info, effects, event_queue)
+                if *timer >= 0.0 {
+                    *timer -= dt
+                } else {
+                    self.shoot(cells, npc_info, effects, event_queue);
+                    self.end_current_action();
                 }
             }
-        };
-        match &mut self.tasks.current_action {
-            None => {},
-            Some(Action::Moving) => {},
-            Some(Action::Shooting(timer)) => {
-                if timer.current >= timer.limit {
-                    self.end_current_action();
-                } else {
-                    timer.current += dt;
-                }
-            },
         };
     }
 
@@ -329,12 +327,20 @@ impl Npc {
         npc_info: &HashMap<Id, NpcAttributes>,
     ) {
         let Some(current_task) = self.tasks.queue.pop_front() else {
-            return;
+            if let Some(_) = self.find_target(cells, npc_info) {
+                return;
+            } else {
+                self.find_next_cover(cells, game_map, npc_info);
+                return;
+            }
         };
         match &current_task.task_type {
             TaskType::Move(target_point) => self.target_move(&target_point),
             TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
-            TaskType::FindTarget => self.find_target(cells, npc_info),
+            TaskType::FindTarget => {
+                self.find_target(cells, npc_info);
+                return;
+            }
         }
     }
 
@@ -361,6 +367,7 @@ impl Npc {
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
             self.end_current_action();
+            self.knowledge.current_cover = self.knowledge.cover_target;
             self.knowledge.cover_target = None;
             if let Some(enemy_dir) = &self.knowledge.enemy_direction {
                 self.look_dir = enemy_dir.clone();
@@ -398,13 +405,13 @@ impl Npc {
         effects: &mut EffectQueue,
         event_queue: &mut EventQueue,
     ) {
-        // println!("{} is shooting", self.id);
-        let shoot_dir = self
-            .knowledge
-            .shoot_dir
-            .as_ref()
-            .expect("Shouldn't be shooting without a target!");
-        // get unified list of all entity positions and bounds
+        let target_id = self.knowledge.enemy_target.expect("Should always have a target when shooting");
+        let target_position = &npc_info.get(&target_id).expect("Target should be an existing npc").position;
+        let shoot_dir = get_direction_between_points(&self.get_position(), &target_position)
+            // Adjust the accuracy of the shot. This will be done by an NPC attribute etc
+            .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
+        // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
+
         // cast ray and get first collision
         let hit_option =
             cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &self);
@@ -421,7 +428,7 @@ impl Npc {
             &shoot_dir,
             end_point,
         )));
-        println!("Bang");
+        // println!("Bang");
     }
 
     fn target_move(&mut self, target_point: &Point) {
@@ -530,9 +537,7 @@ impl Npc {
             if horz_adjust_accum >= cover_radius {
                 // println!("couldn't find cover here {}", horz_adjust_accum);
                 self.end_current_action();
-                // Why does this not exclude the full cover??
                 self.knowledge.full_covers.insert(*cover_target.get_id());
-                // Find another cover. Eventually, this should exclude any covers we know are full?
                 self.tasks
                     .queue
                     .push_back(Task::new(TaskType::FindCloseCover));
@@ -546,7 +551,120 @@ impl Npc {
         self.tasks.current_action = Some(Action::Moving);
     }
 
-    fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) {
+    fn find_next_cover(
+        &mut self,
+        cells: &cell_map::Cells,
+        game_map: &GameMap,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) {
+        // The distance npc's should try and keep from each other and from objects when positioning
+        const EXCLUSION_RADIUS: f64 = 5.0;
+        let exclusion_hash = match self.knowledge.current_cover {
+            Some(current_cover) => {
+                self.knowledge.full_covers.insert(current_cover);
+                &self.knowledge.full_covers
+            }
+            None => &self.knowledge.full_covers,
+        };
+        let Some(cover_target) = 
+                get_closest_advancing_cover(
+                    &game_map.cover,
+                    &exclusion_hash,
+                    &self.attributes.position,
+                    &self.knowledge.enemy_direction.as_ref().expect("Shouldn't be finding cover without an enemy direction"),
+                    self.attributes.vision,
+                )
+        else {
+            // If there were no covers in the list, just stop moving (for now).
+            // TODO: This should probably return to another decision later on
+            self.end_current_action();
+            return;
+        };
+        // Used to make sure npc's don't position themselves outside the cover
+        let cover_radius = cover_target.get_length() / 2.0;
+        // Position the npc correctly on the cover by collision checking
+        let enemy_dir = self
+            .knowledge
+            .enemy_direction
+            .as_ref()
+            .expect("if there's no enemies, why are we taking cover?");
+
+        let cover_midpoint = cover_target.get_midpoint();
+        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+
+        // Accumulators for adjusting the position if there's an npc in the way
+        let mut vert_adjust_accum = 0.0;
+        let mut horz_adjust_accum = self.attributes.radius + EXCLUSION_RADIUS;
+        // Attempt a bunch of positions behind the cover, checking at each one if there's already
+        // an npc there
+        let target_pos = loop {
+            // Check the current cover position
+            let new_cover_point = vector::translate_point_direction_distance(
+                cover_midpoint,
+                cover_target.get_direction(),
+                vert_adjust_accum,
+            );
+            let candidate_pos = vector::translate_point_direction_distance(
+                &new_cover_point,
+                &rev_enemy_dir,
+                horz_adjust_accum,
+            );
+            if cells
+                .check_if_npc_target_collides_with_npc(
+                    &candidate_pos,
+                    npc_info,
+                    self.attributes.radius,
+                )
+                .is_none()
+            {
+                // If this spot is good, then finish the loop
+                break candidate_pos;
+            }
+
+            // If this point wasn't a fit, then we check the increments:
+            // If we checked the positive direction last, check the negative now
+            if vert_adjust_accum > 0.0 {
+                vert_adjust_accum = -vert_adjust_accum;
+                continue;
+            // Otherwise, we must have checked the negative or 0 direction so check the positive
+            // direction
+            } else {
+                // Get the new vertical adjustment
+                let new_vert_adjust =
+                    vert_adjust_accum.abs() + self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                // If the vert adjustment is going to put the npc out of cover, then reset to 0 and
+                // increment the horizontal adjustment
+                if new_vert_adjust >= cover_radius {
+                    horz_adjust_accum += self.attributes.radius * 2.0 + EXCLUSION_RADIUS;
+                    vert_adjust_accum = 0.0;
+                } else {
+                    // If it's not, then we will go check the positive direction
+                    vert_adjust_accum = new_vert_adjust;
+                    continue;
+                }
+            }
+            // Check if the horizontal adjustment puts them out of cover. This exact method could
+            // change (cover radius is an odd metric). If so, then stop moving and insert this
+            // cover into the npc's list of full covers. If not, then keep looping and check the
+            // next midpoint
+            if horz_adjust_accum >= cover_radius {
+                // println!("couldn't find cover here {}", horz_adjust_accum);
+                self.end_current_action();
+                self.knowledge.full_covers.insert(*cover_target.get_id());
+                self.tasks
+                    .queue
+                    .push_back(Task::new(TaskType::FindCloseCover));
+                return;
+            }
+        };
+        // If we made it out of the loop, we have a cover target pos to move to. Set the movement
+        // target, the cover target, and the action
+        self.knowledge.movement_target = Some(target_pos);
+        self.knowledge.cover_target = Some(*cover_target.get_id());
+        self.tasks.current_action = Some(Action::Moving);
+    }
+
+    fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
         // Get the closest N
         let closest_enemy = npc_info
             .iter()
@@ -562,19 +680,13 @@ impl Npc {
                 let distance = get_distance_between_points(self.get_position(), &attr.position);
                 (id, distance, attr)
             })
-            .min_by(|x, y| x.1.total_cmp(&y.1));
-        let Some(enemy) = closest_enemy else {
-            self.tasks.queue.push_front(Task::new(TaskType::FindTarget));
-            return;
-        };
-        // Get the shoot direction and also move it by between +- PI/4
-        let shoot_dir = get_direction_between_points(&self.get_position(), &enemy.2.position)
-            .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
-        // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
-        self.knowledge.shoot_dir = Some(shoot_dir);
+            .min_by(|x, y| x.1.total_cmp(&y.1))?;
+        // Save the target to actually shoot at later
+        self.knowledge.enemy_target = Some(*closest_enemy.0);
         // This is a temp const, this would be determined by weapon/xp/etc
-        const SHOOT_TIMER: f64 = 1.0;
-        self.tasks.current_action = Some(Action::Shooting(Timer::new(SHOOT_TIMER)));
+        const SHOOT_TIMER: f64 = 0.5;
+        self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
+        Some(*closest_enemy.0)
     }
 }
 
@@ -598,22 +710,22 @@ impl Task {
 
 enum Action {
     Moving,
-    Shooting(Timer),
+    Shooting(f64),
 }
 
-struct Timer {
-    current: f64,
-    limit: f64,
-}
-
-impl Timer {
-    fn new(duration: f64) -> Timer {
-        Timer {
-            current: 0.0,
-            limit: duration,
-        }
-    }
-}
+// struct Timer {
+//     current: f64,
+//     limit: f64,
+// }
+//
+// impl Timer {
+//     fn new(duration: f64) -> Timer {
+//         Timer {
+//             current: 0.0,
+//             limit: duration,
+//         }
+//     }
+// }
 
 pub fn render_npcs<'a, G: Graphics>(
     npc_list: impl Iterator<Item = &'a Npc>,

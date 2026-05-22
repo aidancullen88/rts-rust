@@ -37,7 +37,7 @@ impl Cover {
     }
 }
 
-pub fn init_covers(simple_cover_list: [[u32; 4]; 6], game_state: &mut GameState) -> HashMap<Id, Cover> {
+pub fn init_covers(simple_cover_list: &[[u32; 4]], game_state: &mut GameState) -> HashMap<Id, Cover> {
     simple_cover_list
         .iter()
         .map(|c| {
@@ -89,6 +89,24 @@ pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exc
         }
     }
     return None;
+}
+
+pub fn get_closest_advancing_cover<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exclude: &HashSet<Id>, npc_pos: &Point, advance_direction: &Vector, threshold: f64) -> Option<&'a Cover> {
+    // Get the covers that are within the threshold, and the weight (threshold - distance)
+    covers.iter().filter_map(|(id, c)| {
+        let distance = get_distance_between_points(npc_pos, &c.midpoint);
+        if covers_to_exclude.contains(&c.id) {
+            return None;
+        }
+        if distance > threshold {
+            return None;
+        }
+        // println!("x dir: {}, y dir: {}", (c.midpoint.x - npc_pos.x) * advance_direction.x, (c.midpoint.y - npc_pos.y) * advance_direction.y);
+        if advance_direction.x == 0.0 || (c.midpoint.x - npc_pos.x) * advance_direction.x >= 100.0 && advance_direction.y == 0.0 || (c.midpoint.y - npc_pos.y) * advance_direction.y >= 100.0 {
+            return Some(c)
+        }
+        return None;
+    }).next()
 }
 
 pub fn render_covers<G: Graphics>(covers: &HashMap<Id, Cover>, c: &Context, g: &mut G) {

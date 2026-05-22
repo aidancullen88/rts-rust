@@ -182,11 +182,9 @@ impl Cells {
         // cells for that quad rather than all of them
 
         let ray_quad = get_vector_quad(direction)?;
-        println!("{:#?}", ray_quad);
         let start_cell = self.calculate_cell_from_pos(origin);
         // Check what quad we're in and filter the cells based on this e.g. for LeftTop, cellpos
         // should be >= both x and y of the current cell
-        println!("cell map: {:#?}", &self.cells);
         self.cells
             .iter()
             .filter(|(cell_pos, _)| match ray_quad {
@@ -210,7 +208,6 @@ impl Cells {
             })
             // Filter the list by some pre-conditions, and finally the collision check with the ray
             .filter_map(|(id, npc_info)| {
-                println!("id: {}, current_id: {}", id, current_npc.get_id());
                 if *id == current_npc.get_id()
                     || &npc_info.team == current_npc.get_team()
                     // Don't collide with dead npcs

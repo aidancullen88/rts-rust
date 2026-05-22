@@ -175,17 +175,18 @@ fn main() {
         .unwrap();
 
     // This should come from a config/map file eventually
-    const COVER_LIST: [[u32; 4]; 6] = [
+    const COVER_LIST: [[u32; 4]; 7] = [
         [250, 100, 250, 200],
         [150, 300, 150, 400],
         [250, 500, 250, 600],
         [750, 100, 750, 200],
         [850, 300, 850, 400],
         [750, 500, 750, 600],
+        [500, 300, 500, 400],
     ];
 
     let mut game_state = GameState { paused: false, entity_id_counter: 0 };
-    let covers = crate::cover::init_covers(COVER_LIST, &mut game_state);
+    let covers = crate::cover::init_covers(&COVER_LIST, &mut game_state);
 
     let mut app = App {
         gl: GlGraphics::new(opengl),

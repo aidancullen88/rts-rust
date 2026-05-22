@@ -107,7 +107,6 @@ pub fn get_vector_quad(v: &Vector) -> Option<Quad> {
         return None;
     }
     let angle = v.angle();
-    println!("angle: {}", angle);
     if angle < FRAC_PI_2 {
         Some(Quad::RightDown)
     } else if angle < PI {
