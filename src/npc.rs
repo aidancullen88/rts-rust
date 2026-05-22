@@ -697,7 +697,7 @@ impl Npc {
         // Save the target to actually shoot at later
         self.knowledge.enemy_target = Some(*closest_enemy.0);
         // This is a temp const, this would be determined by weapon/xp/etc
-        const SHOOT_TIMER: f64 = 0.3;
+        const SHOOT_TIMER: f64 = 0.5;
         self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
         Some(*closest_enemy.0)
     }
