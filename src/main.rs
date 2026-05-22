@@ -8,11 +8,11 @@ extern crate piston;
 
 mod cell_map;
 mod cover;
+mod effect;
+mod event;
 mod npc;
 mod point;
 mod vector;
-mod effect;
-mod event;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -81,7 +81,12 @@ impl App {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        self.npcs.update_npcs(&self.game_map, &mut self.effect_queue, &mut self.event_queue, &args.dt);
+        self.npcs.update_npcs(
+            &self.game_map,
+            &mut self.effect_queue,
+            &mut self.event_queue,
+            &args.dt,
+        );
     }
     fn control<E: GenericEvent>(&mut self, window_dims: &[u32; 2], event: &E) {
         // Save the current mouse position to use throughout the event handlers
@@ -110,8 +115,17 @@ impl App {
                 } else {
                     ([-1.0, 0.0], NpcTeam::Red)
                 };
-                let new_npc_id = self.npcs.spawn_npc(self.mouse_pos.into(), look_dir.into(), Some(look_dir.into()), team, &mut self.game_state);
-                let new_npc = self.npcs.get_npc_by_id_mut(&new_npc_id).expect("We just created this npc, so should be here");
+                let new_npc_id = self.npcs.spawn_npc(
+                    self.mouse_pos.into(),
+                    look_dir.into(),
+                    Some(look_dir.into()),
+                    team,
+                    &mut self.game_state,
+                );
+                let new_npc = self
+                    .npcs
+                    .get_npc_by_id_mut(&new_npc_id)
+                    .expect("We just created this npc, so should be here");
                 new_npc.queue_task(Task::new(TaskType::FindCloseCover));
                 new_npc.queue_task(Task::new(TaskType::FindTarget));
             }
@@ -121,14 +135,12 @@ impl App {
                 &self.mouse_pos.into(),
                 &self.npcs.get_npc_info_map(),
             ) {
-                    self.npcs.delete_npc(&npc_id);
+                self.npcs.delete_npc(&npc_id);
             }
         }
         if let Some(button_args) = event.button_args() {
             match (button_args.button, button_args.state) {
-                (piston_key!(P), ButtonState::Press) => {
-                    self.game_state.toggle_pause()
-                }
+                (piston_key!(P), ButtonState::Press) => self.game_state.toggle_pause(),
                 (piston_key!(C), ButtonState::Press) => {
                     self.npcs.clear_npcs();
                 }
@@ -139,7 +151,8 @@ impl App {
                     }
                 }
                 (piston_key!(S), ButtonState::Press) => {
-                    self.npcs.queue_task_all_npcs(Task::new(TaskType::FindTarget));
+                    self.npcs
+                        .queue_task_all_npcs(Task::new(TaskType::FindTarget));
                 }
                 _ => (),
             }
@@ -175,17 +188,35 @@ fn main() {
         .unwrap();
 
     // This should come from a config/map file eventually
-    const COVER_LIST: [[u32; 4]; 7] = [
-        [250, 100, 250, 200],
-        [150, 300, 150, 400],
-        [250, 500, 250, 600],
-        [750, 100, 750, 200],
-        [850, 300, 850, 400],
-        [750, 500, 750, 600],
-        [500, 300, 500, 400],
+    // const COVER_LIST: [[u32; 4]; 7] = [
+    //     [250, 100, 250, 200],
+    //     [150, 300, 150, 400],
+    //     [250, 500, 250, 600],
+    //     [750, 100, 750, 200],
+    //     [850, 300, 850, 400],
+    //     [750, 500, 750, 600],
+    //     [500, 300, 500, 400],
+    // ];
+
+    const COVER_LIST: [[u32; 4]; 12] = [
+        [180, 120, 180, 230], // left column, top
+        [180, 320, 180, 430], // left column, middle
+        [180, 520, 180, 630], // left column, bottom
+        [380, 150, 380, 260], // center-left column, top
+        [380, 350, 380, 460], // center-left column, middle
+        [380, 550, 380, 650], // center-left column, bottom
+        [580, 120, 580, 230], // center-right column, top
+        [580, 320, 580, 430], // center-right column, middle
+        [580, 520, 580, 630], // center-right column, bottom
+        [780, 150, 780, 260], // right column, top
+        [780, 350, 780, 460], // right column, middle
+        [780, 550, 780, 650], // right column, bottom
     ];
 
-    let mut game_state = GameState { paused: false, entity_id_counter: 0 };
+    let mut game_state = GameState {
+        paused: false,
+        entity_id_counter: 0,
+    };
     let covers = crate::cover::init_covers(&COVER_LIST, &mut game_state);
 
     let mut app = App {
@@ -201,9 +232,7 @@ fn main() {
             opengl_graphics::TextureSettings::new(),
         )
         .unwrap(),
-        game_map: GameMap {
-            cover: covers,
-        },
+        game_map: GameMap { cover: covers },
         effect_queue: effect::new_effect_queue(),
         event_queue: EventQueue::new(),
     };

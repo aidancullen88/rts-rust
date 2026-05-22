@@ -103,10 +103,10 @@ pub fn get_closest_advancing_cover<'a>(covers: &'a HashMap<Id, Cover>, covers_to
         }
         // println!("x dir: {}, y dir: {}", (c.midpoint.x - npc_pos.x) * advance_direction.x, (c.midpoint.y - npc_pos.y) * advance_direction.y);
         if advance_direction.x == 0.0 || (c.midpoint.x - npc_pos.x) * advance_direction.x >= 100.0 && advance_direction.y == 0.0 || (c.midpoint.y - npc_pos.y) * advance_direction.y >= 100.0 {
-            return Some(c)
+            return Some((distance, c))
         }
         return None;
-    }).next()
+    }).min_by(|x, y| x.0.total_cmp(&y.0)).map(|x| x.1)
 }
 
 pub fn render_covers<G: Graphics>(covers: &HashMap<Id, Cover>, c: &Context, g: &mut G) {

@@ -317,6 +317,13 @@ impl Npc {
                     self.end_current_action();
                 }
             }
+            Some(Action::Pause(timer)) => {
+                if *timer >= 0.0 {
+                    *timer -= dt
+                } else {
+                    self.end_current_action();
+                }
+            }
         };
     }
 
@@ -367,6 +374,7 @@ impl Npc {
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
             self.end_current_action();
+            self.tasks.current_action = Some(Action::Pause(1.0));
             self.knowledge.current_cover = self.knowledge.cover_target;
             self.knowledge.cover_target = None;
             if let Some(enemy_dir) = &self.knowledge.enemy_direction {
@@ -668,17 +676,19 @@ impl Npc {
         // Get the closest N
         let closest_enemy = npc_info
             .iter()
-            .filter(|(id, attr)| {
+            .filter_map(|(id, attr)| {
                 // Only check npcs on the other team
-                &attr.team != &self.attributes.team
+                let distance = get_distance_between_points(self.get_position(), &attr.position);
+                if &attr.team != &self.attributes.team
                     // Don't target itself
-                    && **id != self.id
+                    && *id != self.id
                     // Don't target dead npcs
                     && !matches!(attr.status, NpcStatus::Dead)
-            })
-            .map(|(id, attr)| {
-                let distance = get_distance_between_points(self.get_position(), &attr.position);
-                (id, distance, attr)
+                    && distance < self.attributes.vision {
+                        return Some((id, distance, attr));
+                } else {
+                    return None;
+                }
             })
             .min_by(|x, y| x.1.total_cmp(&y.1))?;
         // Save the target to actually shoot at later
@@ -711,6 +721,7 @@ impl Task {
 enum Action {
     Moving,
     Shooting(f64),
+    Pause(f64),
 }
 
 // struct Timer {
