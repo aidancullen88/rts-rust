@@ -337,17 +337,20 @@ impl Npc {
             if let Some(_) = self.find_target(cells, npc_info) {
                 return;
             } else {
-                self.find_next_cover(cells, game_map, npc_info);
+                self.tasks.queue.push_back(Task::new(TaskType::Pause));
+                self.tasks.queue.push_back(Task::new(TaskType::FindNextCover));
                 return;
             }
         };
         match &current_task.task_type {
             TaskType::Move(target_point) => self.target_move(&target_point),
             TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
+            TaskType::FindNextCover => self.find_next_cover(cells, game_map, npc_info),
             TaskType::FindTarget => {
                 self.find_target(cells, npc_info);
                 return;
             }
+            TaskType::Pause => self.tasks.current_action = Some(Action::Pause(0.8)),
         }
     }
 
@@ -374,7 +377,6 @@ impl Npc {
         if point::is_point_distance_leq(&self.attributes.position, &movement_target, 1.0) {
             // Finish current movement task
             self.end_current_action();
-            self.tasks.current_action = Some(Action::Pause(1.0));
             self.knowledge.current_cover = self.knowledge.cover_target;
             self.knowledge.cover_target = None;
             if let Some(enemy_dir) = &self.knowledge.enemy_direction {
@@ -673,6 +675,7 @@ impl Npc {
     }
 
     fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
+        // println!("finding target");
         // Get the closest N
         let closest_enemy = npc_info
             .iter()
@@ -694,22 +697,24 @@ impl Npc {
         // Save the target to actually shoot at later
         self.knowledge.enemy_target = Some(*closest_enemy.0);
         // This is a temp const, this would be determined by weapon/xp/etc
-        const SHOOT_TIMER: f64 = 0.5;
+        const SHOOT_TIMER: f64 = 0.3;
         self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
         Some(*closest_enemy.0)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Task {
     task_type: TaskType,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TaskType {
     Move(Point),
     FindCloseCover,
+    FindNextCover,
     FindTarget,
+    Pause,
 }
 
 impl Task {

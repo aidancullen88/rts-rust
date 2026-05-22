@@ -127,7 +127,6 @@ impl App {
                     .get_npc_by_id_mut(&new_npc_id)
                     .expect("We just created this npc, so should be here");
                 new_npc.queue_task(Task::new(TaskType::FindCloseCover));
-                new_npc.queue_task(Task::new(TaskType::FindTarget));
             }
         }
         if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {
