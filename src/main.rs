@@ -129,13 +129,13 @@ impl App {
                 new_npc.queue_task(Task::new(TaskType::FindCloseCover));
             }
         }
-        if let Some(Button::Mouse(MouseButton::Right)) = event.press_args() {
-            if let Some(npc_id) = self.npcs.cell_map.check_if_point_target_collides_with_npc(
+        if let Some(Button::Mouse(MouseButton::Right)) = event.press_args()
+            && let Some(npc_id) = self.npcs.cell_map.check_if_point_target_collides_with_npc(
                 &self.mouse_pos.into(),
                 &self.npcs.get_npc_info_map(),
-            ) {
-                self.npcs.delete_npc(&npc_id);
-            }
+            )
+        {
+            self.npcs.delete_npc(&npc_id);
         }
         if let Some(button_args) = event.button_args() {
             match (button_args.button, button_args.state) {
@@ -223,7 +223,7 @@ fn main() {
         // Required for mouse updates: initialise to a sensible default
         mouse_pos: [0.0; 2],
         npcs: NpcMap::new(60.0),
-        game_state: game_state,
+        game_state,
         // Initialise the glpyh cache to use for drawing text
         glyphs: GlyphCache::new(
             "assets/Roboto-Regular.ttf",

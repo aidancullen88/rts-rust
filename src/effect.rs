@@ -50,7 +50,7 @@ impl <G: Graphics>Effect<G> for Bullet {
         false
     }
     fn print(&self) -> String {
-        format!("Bullet")
+        "Bullet".to_string()
     }
 }
 

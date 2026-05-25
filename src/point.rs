@@ -13,7 +13,7 @@ impl Point {
     pub fn sub(&self, p: &Point) -> Point {
         Point::new(self.x - p.x, self.y - p.y)
     }
-    pub fn into_vec(&self) -> Vector {
+    pub fn convert_to_vec(&self) -> Vector {
         Vector::new(self.x, self.y)
     }
 }

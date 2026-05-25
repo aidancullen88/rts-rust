@@ -90,7 +90,7 @@ impl NpcMap {
 
     pub fn delete_npc(&mut self, id: &Id) {
         let npc_cell = self
-            .get_npc_by_id(&id)
+            .get_npc_by_id(id)
             .expect("Should def be an npc with this id")
             .knowledge
             .current_cell
@@ -305,7 +305,6 @@ impl Npc {
         match &mut self.tasks.current_action {
             None => {
                 self.setup_next_task(cells, game_map, npc_info);
-                return;
             },
             Some(Action::Moving) => self.move_npc(cells, game_map, npc_info, dt),
             Some(Action::Shooting(timer)) => {
@@ -334,7 +333,7 @@ impl Npc {
         npc_info: &HashMap<Id, NpcAttributes>,
     ) {
         let Some(current_task) = self.tasks.queue.pop_front() else {
-            if let Some(_) = self.find_target(cells, npc_info) {
+            if self.find_target(cells, npc_info).is_some() {
                 return;
             } else {
                 self.tasks.queue.push_back(Task::new(TaskType::Pause));
@@ -343,12 +342,11 @@ impl Npc {
             }
         };
         match &current_task.task_type {
-            TaskType::Move(target_point) => self.target_move(&target_point),
+            TaskType::Move(target_point) => self.target_move(target_point),
             TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
             TaskType::FindNextCover => self.find_next_cover(cells, game_map, npc_info),
             TaskType::FindTarget => {
                 self.find_target(cells, npc_info);
-                return;
             }
             TaskType::Pause => self.tasks.current_action = Some(Action::Pause(0.8)),
         }
@@ -417,14 +415,14 @@ impl Npc {
     ) {
         let target_id = self.knowledge.enemy_target.expect("Should always have a target when shooting");
         let target_position = &npc_info.get(&target_id).expect("Target should be an existing npc").position;
-        let shoot_dir = get_direction_between_points(&self.get_position(), &target_position)
+        let shoot_dir = get_direction_between_points(self.get_position(), target_position)
             // Adjust the accuracy of the shot. This will be done by an NPC attribute etc
             .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
         // println!("{} decided to shoot in direction {:#?}!", self.id, shoot_dir);
 
         // cast ray and get first collision
         let hit_option =
-            cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &self);
+            cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, self);
         // Convert the option tuple to just contain the end point as Bullet::new expects an
         // Option<&Point> for the end point
         let end_point = hit_option.as_ref().map(|t| &t.1);
@@ -487,7 +485,7 @@ impl Npc {
             .expect("if there's no enemies, why are we taking cover?");
 
         let cover_midpoint = cover_target.get_midpoint();
-        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+        let rev_enemy_dir = vector::reverse_vector(enemy_dir);
 
         // Accumulators for adjusting the position if there's an npc in the way
         let mut vert_adjust_accum = 0.0;
@@ -579,9 +577,9 @@ impl Npc {
         let Some(cover_target) = 
                 get_closest_advancing_cover(
                     &game_map.cover,
-                    &exclusion_hash,
+                    exclusion_hash,
                     &self.attributes.position,
-                    &self.knowledge.enemy_direction.as_ref().expect("Shouldn't be finding cover without an enemy direction"),
+                    self.knowledge.enemy_direction.as_ref().expect("Shouldn't be finding cover without an enemy direction"),
                     self.attributes.vision,
                 )
         else {
@@ -600,7 +598,7 @@ impl Npc {
             .expect("if there's no enemies, why are we taking cover?");
 
         let cover_midpoint = cover_target.get_midpoint();
-        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+        let rev_enemy_dir = vector::reverse_vector(enemy_dir);
 
         // Accumulators for adjusting the position if there's an npc in the way
         let mut vert_adjust_accum = 0.0;
@@ -682,15 +680,15 @@ impl Npc {
             .filter_map(|(id, attr)| {
                 // Only check npcs on the other team
                 let distance = get_distance_between_points(self.get_position(), &attr.position);
-                if &attr.team != &self.attributes.team
+                if attr.team != self.attributes.team
                     // Don't target itself
                     && *id != self.id
                     // Don't target dead npcs
                     && !matches!(attr.status, NpcStatus::Dead)
                     && distance < self.attributes.vision {
-                        return Some((id, distance, attr));
+                        Some((id, distance, attr))
                 } else {
-                    return None;
+                    None
                 }
             })
             .min_by(|x, y| x.1.total_cmp(&y.1))?;
