@@ -40,7 +40,7 @@ impl Cells {
     pub fn new(cell_size: f64) -> Self {
         Cells {
             cells: HashMap::new(),
-            cell_size: cell_size,
+            cell_size,
         }
     }
 
@@ -100,10 +100,10 @@ impl Cells {
         old_cell: &CellPos,
         item_id: &Id,
     ) -> Option<CellPos> {
-        let new_cell = self.calculate_cell_from_pos(&new_pos);
+        let new_cell = self.calculate_cell_from_pos(new_pos);
         // check if the cell hasn't changed
         if old_cell != &new_cell {
-            self.remove_from_cell(&old_cell, &item_id);
+            self.remove_from_cell(old_cell, item_id);
         } else {
             return None;
         };
@@ -129,18 +129,17 @@ impl Cells {
             .and_then(|entity_list| {
                 entity_list
                     .iter()
-                    .filter(|e| {
+                    // Find the first npc that is collided with
+                    .find(|e| {
                         let current_npc_info = &npc_info
-                            .get(&e)
+                            .get(e)
                             .expect("Npc shouldn't be missing from info map");
                         point::is_point_distance_leq(
                             &current_npc_info.position,
                             target_pos,
                             npc_radius + current_npc_info.radius,
                         )
-                        // Get the first from the list if there is one, or else None
                     })
-                    .next()
                     .copied()
             })
     }
@@ -155,18 +154,17 @@ impl Cells {
             .and_then(|entity_list| {
                 entity_list
                     .iter()
-                    .filter(|e| {
+                    // Find the first npc that the target collides with
+                    .find(|e| {
                         let current_npc_info = &npc_info
-                            .get(&e)
+                            .get(e)
                             .expect("Npc shouldn't be missing from info map");
                         point::is_point_distance_leq(
                             &current_npc_info.position,
                             target_pos,
                             current_npc_info.radius,
                         )
-                        // Get the first from the list if there is one, or else None
                     })
-                    .next()
                     .copied()
             })
     }
@@ -219,7 +217,7 @@ impl Cells {
                         direction,
                         &npc_info.position,
                         npc_info.radius,
-                    ).and_then(|point| Some((id, point, &npc_info.position)))
+                    ).map(|point| (id, point, &npc_info.position))
             })
             // Get the first npc the ray collides with
             .next()

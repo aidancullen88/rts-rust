@@ -79,7 +79,7 @@ pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exc
     filtered_cover_iter.first()?;
     // Get the total of all the weights
     let total_weight: f64 = filtered_cover_iter.iter().map(|t| t.0).sum();
-    let random_threshold = fastrand::f64() * total_weight.clone();
+    let random_threshold = fastrand::f64() * total_weight;
     let mut acc = 0.0;
     // Get a random cover from the list, weighted to closer covers
     for (weight, cover) in filtered_cover_iter {
@@ -88,7 +88,7 @@ pub fn get_random_cover_target<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exc
             return Some(cover);
         }
     }
-    return None;
+    None
 }
 
 pub fn get_closest_advancing_cover<'a>(covers: &'a HashMap<Id, Cover>, covers_to_exclude: &HashSet<Id>, npc_pos: &Point, advance_direction: &Vector, threshold: f64) -> Option<&'a Cover> {
@@ -105,7 +105,7 @@ pub fn get_closest_advancing_cover<'a>(covers: &'a HashMap<Id, Cover>, covers_to
         if advance_direction.x == 0.0 || (c.midpoint.x - npc_pos.x) * advance_direction.x >= 100.0 && advance_direction.y == 0.0 || (c.midpoint.y - npc_pos.y) * advance_direction.y >= 100.0 {
             return Some((distance, c))
         }
-        return None;
+        None
     }).min_by(|x, y| x.0.total_cmp(&y.0)).map(|x| x.1)
 }
 

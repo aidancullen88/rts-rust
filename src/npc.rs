@@ -1,4 +1,5 @@
 use graphics::{Context, Graphics};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::mem;
@@ -43,22 +44,25 @@ impl NpcMap {
         }
     }
 
-    pub fn spawn_npc(
-        &mut self,
+    pub fn spawn_npc<'a>(
+        &'a mut self,
         pos: Point,
         look_dir: Vector,
         enemy_dir: Option<Vector>,
         team: NpcTeam,
         game_state: &mut GameState,
-    ) -> Id {
+    ) -> &'a mut Npc {
         let npc_id = game_state.get_next_entity_id();
         let mut new_npc = Npc::new(npc_id, &mut self.cell_map, pos.clone(), team);
         new_npc.set_look_dir(look_dir);
         if let Some(dir) = enemy_dir {
             new_npc.set_enemy_dir(dir);
         }
-        self.map.insert(npc_id, new_npc);
-        npc_id
+        // Insert or update the npc, then return a mutable ref
+        match self.map.entry(npc_id) {
+            Entry::Vacant(v) => v.insert(new_npc),
+            Entry::Occupied(mut o) => panic!("There should not be another npc with the same id!"),
+        }
     }
 
     pub fn get_npc_by_id_mut(&mut self, id: &Id) -> Option<&mut Npc> {
@@ -90,7 +94,7 @@ impl NpcMap {
 
     pub fn delete_npc(&mut self, id: &Id) {
         let npc_cell = self
-            .get_npc_by_id(&id)
+            .get_npc_by_id(id)
             .expect("Should def be an npc with this id")
             .knowledge
             .current_cell
@@ -173,14 +177,14 @@ pub struct NpcAttributes {
     pub status: NpcStatus,
 }
 
-struct NpcKnowledge {
-    movement_target: Option<Point>,
-    current_cell: CellPos,
-    enemy_direction: Option<Vector>,
-    cover_target: Option<Id>,
-    full_covers: HashSet<Id>,
-    enemy_target: Option<Id>,
-    current_cover: Option<Id>,
+pub struct NpcKnowledge {
+    pub movement_target: Option<Point>,
+    pub current_cell: CellPos,
+    pub enemy_direction: Option<Vector>,
+    pub cover_target: Option<Id>,
+    pub full_covers: HashSet<Id>,
+    pub enemy_target: Option<Id>,
+    pub current_cover: Option<Id>,
 }
 
 struct NpcTasks {
@@ -343,7 +347,7 @@ impl Npc {
         npc_info: &HashMap<Id, NpcAttributes>,
     ) {
         let Some(current_task) = self.tasks.queue.pop_front() else {
-            if let Some(_) = self.find_target(cells, npc_info) {
+            if self.find_target(cells, npc_info).is_some() {
                 return;
             } else {
                 self.tasks.queue.push_back(Task::new(TaskType::Pause));
@@ -354,12 +358,11 @@ impl Npc {
             }
         };
         match &current_task.task_type {
-            TaskType::Move(target_point) => self.target_move(&target_point),
+            TaskType::Move(target_point) => self.target_move(target_point),
             TaskType::FindCloseCover => self.find_close_cover(cells, game_map, npc_info),
             TaskType::FindNextCover => self.find_next_cover(cells, game_map, npc_info),
             TaskType::FindTarget => {
                 self.find_target(cells, npc_info);
-                return;
             }
             TaskType::Pause => self.tasks.current_action = Some(Action::Pause(0.8)),
         }
@@ -460,7 +463,7 @@ impl Npc {
 
         // cast ray and get first collision
         let hit_option =
-            cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, &self);
+            cells.check_if_ray_collides_with_npc(self.get_position(), &shoot_dir, npc_info, self);
         // Convert the option tuple to just contain the end point as Bullet::new expects an
         // Option<&Point> for the end point
         let end_point = hit_option.as_ref().map(|t| &t.1);
@@ -523,7 +526,7 @@ impl Npc {
             .expect("if there's no enemies, why are we taking cover?");
 
         let cover_midpoint = cover_target.get_midpoint();
-        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+        let rev_enemy_dir = vector::reverse_vector(enemy_dir);
 
         // Accumulators for adjusting the position if there's an npc in the way
         let mut vert_adjust_accum = 0.0;
@@ -638,7 +641,7 @@ impl Npc {
             .expect("if there's no enemies, why are we taking cover?");
 
         let cover_midpoint = cover_target.get_midpoint();
-        let rev_enemy_dir = vector::reverse_vector(&enemy_dir);
+        let rev_enemy_dir = vector::reverse_vector(enemy_dir);
 
         // Accumulators for adjusting the position if there's an npc in the way
         let mut vert_adjust_accum = 0.0;
@@ -724,7 +727,7 @@ impl Npc {
             .filter_map(|(id, attr)| {
                 // Only check npcs on the other team
                 let distance = get_distance_between_points(self.get_position(), &attr.position);
-                if &attr.team != &self.attributes.team
+                if attr.team != self.attributes.team
                     // Don't target itself
                     && *id != self.id
                     // Don't target dead npcs
@@ -733,7 +736,7 @@ impl Npc {
                 {
                     return Some((id, distance, attr));
                 } else {
-                    return None;
+                    None
                 }
             })
             .min_by(|x, y| x.1.total_cmp(&y.1))?;

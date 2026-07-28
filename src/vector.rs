@@ -18,8 +18,8 @@ impl Vector {
 
     pub fn normalise(mut self) -> Self {
         let mag = (self.x * self.x + self.y * self.y).sqrt();
-        self.x = self.x / mag;
-        self.y = self.y / mag;
+        self.x /= mag;
+        self.y /= mag;
         self
     }
 
@@ -28,7 +28,7 @@ impl Vector {
         if quad_rad <= 0.0 {
             quad_rad += 2.0 * f64::consts::PI;
         }
-        return quad_rad;
+        quad_rad
     }
     
     pub fn dot(&self, v: &Vector) -> f64 {
@@ -119,7 +119,7 @@ pub fn get_vector_quad(v: &Vector) -> Option<Quad> {
 }
 
 pub fn check_ray_collides_circle(origin: &Point, direction: &Vector, circle_pos: &Point, circle_radius: f64) -> Option<Point> {
-    let vec_npc_origin = circle_pos.sub(origin).into_vec();
+    let vec_npc_origin = circle_pos.sub(origin).convert_to_vec();
     let circle_projection = vec_npc_origin.dot(direction).max(0.0);
     let closest = translate_point_direction_distance(origin, direction, circle_projection);
     if is_point_distance_leq(circle_pos, &closest, circle_radius) {
