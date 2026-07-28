@@ -306,8 +306,17 @@ impl Npc {
             None => {
                 self.setup_next_task(cells, game_map, npc_info);
                 return;
-            },
+            }
             Some(Action::Moving) => self.move_npc(cells, game_map, npc_info, dt),
+            Some(Action::Aiming(timer)) => {
+                println!("timer: {}", timer);
+                if *timer >= 0.0 {
+                    self.aim(cells, npc_info, dt);
+                } else {
+                    self.end_current_action();
+                    self.tasks.current_action = Some(Action::Shooting(0.3));
+                }
+            }
             Some(Action::Shooting(timer)) => {
                 // Only shoot at the start of the action
                 if *timer >= 0.0 {
@@ -338,7 +347,9 @@ impl Npc {
                 return;
             } else {
                 self.tasks.queue.push_back(Task::new(TaskType::Pause));
-                self.tasks.queue.push_back(Task::new(TaskType::FindNextCover));
+                self.tasks
+                    .queue
+                    .push_back(Task::new(TaskType::FindNextCover));
                 return;
             }
         };
@@ -408,6 +419,25 @@ impl Npc {
         self.update_position(cells, new_pos);
     }
 
+    fn aim(&mut self, cells: &Cells, npc_info: &HashMap<Id, NpcAttributes>, dt: &f64) {
+        let target_id = self
+            .knowledge
+            .enemy_target
+            .expect("Should always have a target when shooting");
+        let target_position = &npc_info
+            .get(&target_id)
+            .expect("Target should be an existing npc")
+            .position;
+        let shoot_dir = get_direction_between_points(&self.get_position(), &target_position)
+            // Adjust the accuracy of the shot. This will be done by an NPC attribute etc
+            .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
+        self.look_dir = shoot_dir;
+        if let Some(Action::Aiming(mut timer)) = self.tasks.current_action {
+            println!("are we here");
+            timer -= dt;
+        }
+    }
+
     fn shoot(
         &mut self,
         cells: &Cells,
@@ -415,8 +445,14 @@ impl Npc {
         effects: &mut EffectQueue,
         event_queue: &mut EventQueue,
     ) {
-        let target_id = self.knowledge.enemy_target.expect("Should always have a target when shooting");
-        let target_position = &npc_info.get(&target_id).expect("Target should be an existing npc").position;
+        let target_id = self
+            .knowledge
+            .enemy_target
+            .expect("Should always have a target when shooting");
+        let target_position = &npc_info
+            .get(&target_id)
+            .expect("Target should be an existing npc")
+            .position;
         let shoot_dir = get_direction_between_points(&self.get_position(), &target_position)
             // Adjust the accuracy of the shot. This will be done by an NPC attribute etc
             .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
@@ -576,15 +612,17 @@ impl Npc {
             }
             None => &self.knowledge.full_covers,
         };
-        let Some(cover_target) = 
-                get_closest_advancing_cover(
-                    &game_map.cover,
-                    &exclusion_hash,
-                    &self.attributes.position,
-                    &self.knowledge.enemy_direction.as_ref().expect("Shouldn't be finding cover without an enemy direction"),
-                    self.attributes.vision,
-                )
-        else {
+        let Some(cover_target) = get_closest_advancing_cover(
+            &game_map.cover,
+            &exclusion_hash,
+            &self.attributes.position,
+            &self
+                .knowledge
+                .enemy_direction
+                .as_ref()
+                .expect("Shouldn't be finding cover without an enemy direction"),
+            self.attributes.vision,
+        ) else {
             // If there were no covers in the list, just stop moving (for now).
             // TODO: This should probably return to another decision later on
             self.end_current_action();
@@ -674,7 +712,11 @@ impl Npc {
         self.tasks.current_action = Some(Action::Moving);
     }
 
-    fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
+    fn find_target(
+        &mut self,
+        cells: &cell_map::Cells,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) -> Option<Id> {
         // println!("finding target");
         // Get the closest N
         let closest_enemy = npc_info
@@ -687,8 +729,9 @@ impl Npc {
                     && *id != self.id
                     // Don't target dead npcs
                     && !matches!(attr.status, NpcStatus::Dead)
-                    && distance < self.attributes.vision {
-                        return Some((id, distance, attr));
+                    && distance < self.attributes.vision
+                {
+                    return Some((id, distance, attr));
                 } else {
                     return None;
                 }
@@ -697,8 +740,8 @@ impl Npc {
         // Save the target to actually shoot at later
         self.knowledge.enemy_target = Some(*closest_enemy.0);
         // This is a temp const, this would be determined by weapon/xp/etc
-        const SHOOT_TIMER: f64 = 0.8;
-        self.tasks.current_action = Some(Action::Shooting(SHOOT_TIMER));
+        const AIM_TIMER: f64 = 0.8;
+        self.tasks.current_action = Some(Action::Aiming(AIM_TIMER));
         Some(*closest_enemy.0)
     }
 }
@@ -726,6 +769,7 @@ impl Task {
 enum Action {
     Moving,
     Shooting(f64),
+    Aiming(f64),
     Pause(f64),
 }
 
