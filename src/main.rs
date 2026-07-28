@@ -13,6 +13,7 @@ mod event;
 mod npc;
 mod point;
 mod vector;
+mod planning;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -32,6 +33,7 @@ use crate::npc::{Id, NpcTeam, Task, TaskType};
 use crate::npc::{Npc, NpcMap};
 use crate::point::Point;
 
+/// Generates the long statement that represents a key in piston
 #[macro_export]
 macro_rules! piston_key {
     ($i:ident) => {
@@ -39,18 +41,24 @@ macro_rules! piston_key {
     };
 }
 
+/// The effect queue is threaded through the update function. Effects can be added to the queue
+/// here and then will be rendered in the render function later
 pub type EffectQueue = Vec<Box<dyn Effect<GlGraphics>>>;
 
 struct App {
+    // generic graphics handler
     gl: GlGraphics,
     mouse_pos: [f64; 2],
     npcs: NpcMap,
+    // governs if the game is paused and holds the entity id generator
     game_state: GameState,
     // queue to render effects
     effect_queue: EffectQueue,
+    // Events are processed before npcs get to do any actions in update
     event_queue: EventQueue,
     // The glyphs are init'd and stay the same throughout the program, hence 'static
     glyphs: GlyphCache<'static>,
+    // Holds the map details
     game_map: GameMap,
 }
 
@@ -61,10 +69,10 @@ struct GameMap {
 impl App {
     fn render(
         &mut self,
-        // TODO: This will be passed as part of a larger "environment/map" struct probably
         args: &RenderArgs,
     ) {
         // c is the graphics context, gl is the graphics handler: in this case, the opengl handler
+        // all render calls require both
         self.gl.draw(args.viewport(), |c, gl| {
             graphics::clear(graphics::color::BLACK, gl);
             crate::cover::render_covers(&self.game_map.cover, &c, gl);
@@ -76,11 +84,13 @@ impl App {
                 &c,
                 gl,
             );
+            // Render any effects that have been added to the effect queue on the last update
             crate::effect::render_effects(&mut self.effect_queue, &c, gl, args.ext_dt);
         })
     }
 
     fn update(&mut self, args: &UpdateArgs) {
+        // the npcs struct handles updating all of its npcs itself
         self.npcs.update_npcs(
             &self.game_map,
             &mut self.effect_queue,
@@ -89,7 +99,8 @@ impl App {
         );
     }
     fn control<E: GenericEvent>(&mut self, window_dims: &[u32; 2], event: &E) {
-        // Save the current mouse position to use throughout the event handlers
+        // Save the current mouse position to use throughout the event handlers (like on the next
+        // update call)
         if let Some(pos) = event.mouse_cursor_args() {
             self.mouse_pos = pos;
         }
@@ -108,6 +119,7 @@ impl App {
             } else if let Some(selected_npc) = self.npcs.get_selected_npc() {
                 selected_npc.queue_task(Task::new(TaskType::Move(self.mouse_pos.into())));
                 self.npcs.deselect_npc();
+            // If there's no npc selected and we're clicking on blank space, spawn a new npc
             } else {
                 // Set npcs that spawn on the left of the screen to look right and vice versa
                 let (look_dir, team) = if self.mouse_pos[0] <= f64::from(window_dims[0]) / 2.0 {
@@ -115,17 +127,13 @@ impl App {
                 } else {
                     ([-1.0, 0.0], NpcTeam::Red)
                 };
-                let new_npc_id = self.npcs.spawn_npc(
+                let new_npc = self.npcs.spawn_npc(
                     self.mouse_pos.into(),
                     look_dir.into(),
                     Some(look_dir.into()),
                     team,
                     &mut self.game_state,
                 );
-                let new_npc = self
-                    .npcs
-                    .get_npc_by_id_mut(&new_npc_id)
-                    .expect("We just created this npc, so should be here");
                 new_npc.queue_task(Task::new(TaskType::FindCloseCover));
             }
         }
@@ -197,20 +205,22 @@ fn main() {
     //     [500, 300, 500, 400],
     // ];
 
-    const COVER_LIST: [[u32; 4]; 12] = [
-        [180, 120, 180, 230], // left column, top
-        [180, 320, 180, 430], // left column, middle
-        [180, 520, 180, 630], // left column, bottom
-        [380, 150, 380, 260], // center-left column, top
-        [380, 350, 380, 460], // center-left column, middle
-        [380, 550, 380, 650], // center-left column, bottom
-        [580, 120, 580, 230], // center-right column, top
-        [580, 320, 580, 430], // center-right column, middle
-        [580, 520, 580, 630], // center-right column, bottom
-        [780, 150, 780, 260], // right column, top
-        [780, 350, 780, 460], // right column, middle
-        [780, 550, 780, 650], // right column, bottom
-    ];
+    // const COVER_LIST: [[u32; 4]; 12] = [
+    //     [180, 120, 180, 230], // left column, top
+    //     [180, 320, 180, 430], // left column, middle
+    //     [180, 520, 180, 630], // left column, bottom
+    //     [380, 150, 380, 260], // center-left column, top
+    //     [380, 350, 380, 460], // center-left column, middle
+    //     [380, 550, 380, 650], // center-left column, bottom
+    //     [580, 120, 580, 230], // center-right column, top
+    //     [580, 320, 580, 430], // center-right column, middle
+    //     [580, 520, 580, 630], // center-right column, bottom
+    //     [780, 150, 780, 260], // right column, top
+    //     [780, 350, 780, 460], // right column, middle
+    //     [780, 550, 780, 650], // right column, bottom
+    // ];
+
+    const COVER_LIST: [[u32; 4]; 0] = [];
 
     let mut game_state = GameState {
         paused: false,

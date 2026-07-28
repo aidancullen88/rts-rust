@@ -1,4 +1,5 @@
 use graphics::{Context, Graphics};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::mem;
@@ -43,22 +44,25 @@ impl NpcMap {
         }
     }
 
-    pub fn spawn_npc(
-        &mut self,
+    pub fn spawn_npc<'a>(
+        &'a mut self,
         pos: Point,
         look_dir: Vector,
         enemy_dir: Option<Vector>,
         team: NpcTeam,
         game_state: &mut GameState,
-    ) -> Id {
+    ) -> &'a mut Npc {
         let npc_id = game_state.get_next_entity_id();
         let mut new_npc = Npc::new(npc_id, &mut self.cell_map, pos.clone(), team);
         new_npc.set_look_dir(look_dir);
         if let Some(dir) = enemy_dir {
             new_npc.set_enemy_dir(dir);
         }
-        self.map.insert(npc_id, new_npc);
-        npc_id
+        // Insert or update the npc, then return a mutable ref
+        match self.map.entry(npc_id) {
+            Entry::Vacant(v) => v.insert(new_npc),
+            Entry::Occupied(mut o) => panic!("There should not be another npc with the same id!"),
+        }
     }
 
     pub fn get_npc_by_id_mut(&mut self, id: &Id) -> Option<&mut Npc> {
@@ -173,7 +177,7 @@ pub struct NpcAttributes {
     pub status: NpcStatus,
 }
 
-struct NpcKnowledge {
+pub struct NpcKnowledge {
     movement_target: Option<Point>,
     current_cell: CellPos,
     enemy_direction: Option<Vector>,
@@ -305,7 +309,7 @@ impl Npc {
         match &mut self.tasks.current_action {
             None => {
                 self.setup_next_task(cells, game_map, npc_info);
-            },
+            }
             Some(Action::Moving) => self.move_npc(cells, game_map, npc_info, dt),
             Some(Action::Shooting(timer)) => {
                 // Only shoot at the start of the action
@@ -337,7 +341,9 @@ impl Npc {
                 return;
             } else {
                 self.tasks.queue.push_back(Task::new(TaskType::Pause));
-                self.tasks.queue.push_back(Task::new(TaskType::FindNextCover));
+                self.tasks
+                    .queue
+                    .push_back(Task::new(TaskType::FindNextCover));
                 return;
             }
         };
@@ -413,8 +419,14 @@ impl Npc {
         effects: &mut EffectQueue,
         event_queue: &mut EventQueue,
     ) {
-        let target_id = self.knowledge.enemy_target.expect("Should always have a target when shooting");
-        let target_position = &npc_info.get(&target_id).expect("Target should be an existing npc").position;
+        let target_id = self
+            .knowledge
+            .enemy_target
+            .expect("Should always have a target when shooting");
+        let target_position = &npc_info
+            .get(&target_id)
+            .expect("Target should be an existing npc")
+            .position;
         let shoot_dir = get_direction_between_points(self.get_position(), target_position)
             // Adjust the accuracy of the shot. This will be done by an NPC attribute etc
             .rotate((fastrand::f64() - 0.5) * (PI / 16.0));
@@ -574,15 +586,16 @@ impl Npc {
             }
             None => &self.knowledge.full_covers,
         };
-        let Some(cover_target) = 
-                get_closest_advancing_cover(
-                    &game_map.cover,
-                    exclusion_hash,
-                    &self.attributes.position,
-                    self.knowledge.enemy_direction.as_ref().expect("Shouldn't be finding cover without an enemy direction"),
-                    self.attributes.vision,
-                )
-        else {
+        let Some(cover_target) = get_closest_advancing_cover(
+            &game_map.cover,
+            exclusion_hash,
+            &self.attributes.position,
+            self.knowledge
+                .enemy_direction
+                .as_ref()
+                .expect("Shouldn't be finding cover without an enemy direction"),
+            self.attributes.vision,
+        ) else {
             // If there were no covers in the list, just stop moving (for now).
             // TODO: This should probably return to another decision later on
             self.end_current_action();
@@ -672,7 +685,11 @@ impl Npc {
         self.tasks.current_action = Some(Action::Moving);
     }
 
-    fn find_target(&mut self, cells: &cell_map::Cells, npc_info: &HashMap<Id, NpcAttributes>) -> Option<Id> {
+    fn find_target(
+        &mut self,
+        cells: &cell_map::Cells,
+        npc_info: &HashMap<Id, NpcAttributes>,
+    ) -> Option<Id> {
         // println!("finding target");
         // Get the closest N
         let closest_enemy = npc_info
@@ -685,8 +702,9 @@ impl Npc {
                     && *id != self.id
                     // Don't target dead npcs
                     && !matches!(attr.status, NpcStatus::Dead)
-                    && distance < self.attributes.vision {
-                        Some((id, distance, attr))
+                    && distance < self.attributes.vision
+                {
+                    Some((id, distance, attr))
                 } else {
                     None
                 }
